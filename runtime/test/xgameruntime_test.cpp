@@ -922,6 +922,55 @@ void check_run_time_load() {
 
 }  // namespace
 
+// advapi32's ConsoleMode under HKLM\...\OEM, which the title reads for its console type: the value follows
+// XSystemGetDeviceType (LEONIDA_DEVICE_TYPE), Pc has no key, and other keys reach the host's registry.
+void check_console_mode() {
+    using OpenFn = LSTATUS(WINAPI*)(HKEY, LPCWSTR, PHKEY);
+    using QueryFn = LSTATUS(WINAPI*)(HKEY, LPCWSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD);
+    using CloseFn = LSTATUS(WINAPI*)(HKEY);
+    const auto open = reinterpret_cast<OpenFn>(rt::shims::find("advapi32.dll", "RegOpenKeyW"));
+    const auto query = reinterpret_cast<QueryFn>(rt::shims::find("advapi32.dll", "RegQueryValueExW"));
+    const auto close = reinterpret_cast<CloseFn>(rt::shims::find("advapi32.dll", "RegCloseKey"));
+    check(open && query && close, "advapi32.dll RegOpenKeyW, RegQueryValueExW and RegCloseKey are shims");
+    check(!rt::shims::owns_dll("advapi32.dll"), "advapi32.dll stays a host DLL: its other names bind to the host's");
+    if (!open || !query || !close) return;
+    const wchar_t* const oem = L"Software\\Microsoft\\Windows NT\\CurrentVersion\\OEM";
+    const auto read = [&](DWORD& value, DWORD& type) -> LSTATUS {
+        HKEY key = nullptr;
+        if (const LSTATUS rc = open(HKEY_LOCAL_MACHINE, oem, &key); rc != ERROR_SUCCESS) return rc;
+        DWORD size = sizeof(value);
+        const LSTATUS rc = query(key, L"ConsoleMode", nullptr, &type, reinterpret_cast<LPBYTE>(&value), &size);
+        close(key);
+        return rc == ERROR_SUCCESS && size != sizeof(value) ? ERROR_INVALID_DATA : rc;
+    };
+    DWORD value = 0, type = 0;
+    check(read(value, type) == ERROR_SUCCESS && type == REG_DWORD && value == 0x64,
+          "ConsoleMode is 0x64 (Series X) by default, as XSystemGetDeviceType's 7");
+    SetEnvironmentVariableA("LEONIDA_DEVICE_TYPE", "6");
+    check(read(value, type) == ERROR_SUCCESS && value == 0x60, "LEONIDA_DEVICE_TYPE=6 gives ConsoleMode 0x60 (Series S)");
+    SetEnvironmentVariableA("LEONIDA_DEVICE_TYPE", "1");
+    HKEY key = nullptr;
+    check(open(HKEY_LOCAL_MACHINE, oem, &key) == ERROR_FILE_NOT_FOUND, "LEONIDA_DEVICE_TYPE=1 (Pc): no OEM key");
+    SetEnvironmentVariableA("LEONIDA_DEVICE_TYPE", nullptr);
+    if (open(HKEY_LOCAL_MACHINE, L"software\\microsoft\\windows nt\\currentversion\\oem", &key) == ERROR_SUCCESS) {
+        DWORD size = 0;
+        check(query(key, L"ConsoleMode", nullptr, &type, nullptr, &size) == ERROR_SUCCESS && size == 4,
+              "the key matches case-insensitively; a size query gives 4 bytes");
+        BYTE small[2];
+        size = sizeof(small);
+        check(query(key, L"ConsoleMode", nullptr, nullptr, small, &size) == ERROR_MORE_DATA && size == 4,
+              "a 2-byte buffer gets ERROR_MORE_DATA and the size 4");
+        check(query(key, L"Other", nullptr, nullptr, nullptr, nullptr) == ERROR_FILE_NOT_FOUND,
+              "any other value under the key is ERROR_FILE_NOT_FOUND");
+        check(close(key) == ERROR_SUCCESS, "RegCloseKey closes the OEM key");
+    } else {
+        check(false, "the key matches case-insensitively");
+    }
+    HKEY host = nullptr;
+    const LSTATUS rc = open(HKEY_LOCAL_MACHINE, L"Software\\Microsoft", &host);
+    check(rc == ERROR_SUCCESS && host && close(host) == ERROR_SUCCESS, "another key opens and closes in the host's registry");
+}
+
 int main() {
     std::printf("xgameruntime_test: the offline GDK runtime shim, through the shim registry\n");
 
@@ -943,6 +992,7 @@ int main() {
     check(init() == S_OK, "a second XGameRuntimeInitialize also returns S_OK (reference counted)");
 
     check(get<DeviceTypeFn>("XSystemGetDeviceType")() == 7, "XSystemGetDeviceType reports XboxScarlettAnaconda (7)");
+    check_console_mode();
 
     auto console_id = get<ConsoleIdFn>("XSystemGetConsoleId");
     char id[64] = {};

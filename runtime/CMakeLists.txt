@@ -124,6 +124,7 @@ if(WIN32 AND LEONIDA_BUILD_WINDOWS_RUNTIME)
     shims/xgameruntime_gamesave.cpp
     shims/xgameruntime_store.cpp
     shims/xgameruntime_offline.cpp
+    shims/advapi32_registry.cpp
     shims/library_loader.cpp
     shims/process.cpp
     shims/com_shim.cpp
@@ -351,6 +352,7 @@ if(WIN32 AND LEONIDA_BUILD_WINDOWS_RUNTIME)
   # a title calls it at boot. Like xmem_test it compiles its own registry.cpp.
   add_executable(xgameruntime_test
     test/xgameruntime_test.cpp
+    shims/advapi32_registry.cpp
     shims/xgameruntime.cpp
     shims/xgameruntime_user.cpp
     shims/xgameruntime_gamesave.cpp
