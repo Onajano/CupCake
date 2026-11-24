@@ -9,6 +9,7 @@ post counts and pass/fail lines there, never game shaders, logs or private paths
 | AMD Radeon RX 9070 GRE (RDNA4, GFX1201), subgroup 32..64 | RADV, Mesa 26.3.1-arch3.5, Vulkan 1.4.363, CachyOS | `05961f0` | 264/264 translated and valid | 203/206 pass, 3 skipped | 218/235 passed, 16 skipped (native and emulated) | `ms_wave_info_s3`, flaky (see below) | [local note](../gpu-test-results/RX9070GRE.txt) |
 | AMD Radeon RX 9070 XT (RDNA4, GFX1201), subgroup 32..64 | AMD 26.11.2 (LLPC), Vulkan 1.4.359, Windows 11 26300.9550 | `5d74c27` | not run | not run | 224/241 passed, 16 skipped, 1 failed (native); 225/241 passed, 0 failed (`LEONIDA_W64_EMULATE=1`) | `ms_wave_info_s3`, every native run, flaky emulated (see below) | [local note](../gpu-test-results/RX9070XT.txt) |
 | AMD Radeon RX 7900 GRE (RDNA3, gfx1100), subgroup 32..64 | AMD proprietary 26.11.2 (LLPC), Vulkan 1.4.359, Windows 11 x64 | `5d74c27` | 247/247 translated and valid | run via run_gpu_tests.py | 225/241 passed, 16 skipped | none | [#166](https://github.com/ItsNotRexed/Leonida/issues/166#issuecomment-7115041436) |
+| NVIDIA GeForce RTX 5060 Ti (Blackwell), subgroup 32..32 | NVIDIA 610.88, Windows 11 | `5d74c27` | 270/270 translated and valid | 176/211 pass, 35 skipped | 192/241 passed, 48 skipped (native); 25/26 (`LEONIDA_W64_EMULATE=1 --filter w64`) | `ms_wave_info_s3` (known #8608) | [#166](https://github.com/ItsNotRexed/Leonida/issues/166) |
 
 ## AMD Radeon RX 9070 GRE — 2026-11-23
 
@@ -96,3 +97,26 @@ until it reports nothing to do before installing it. Loader warnings from instal
 affect the run. This is the first RDNA3 entry: wave64 and mesh shader tests ran natively (all `ms_*` pass).
 
 AI-assisted (Claude): helped set up the tools and write this entry; the build and test run were done on this GPU.
+
+## NVIDIA GeForce RTX 5060 Ti — 2026-11-24
+
+```
+GPU:        NVIDIA GeForce RTX 5060 Ti (Blackwell), subgroup 32..32
+Driver:     NVIDIA 610.88
+Subgroup:   32..32 (native 32-wide)
+OS:         Windows 11
+Commit:     5d74c272363f2703265d44e6aaab1a1df8ddfaf3 (main, 2026-11-24)
+Tools:      MSVC 19.52 (Visual Studio 2026) + Windows SDK 10.0.26100.0, Vulkan SDK 1.4.363.0, llvm-mc 21.1.8 (native), CMake 4.4.4, Python 3.14.4
+build.py:   270 shaders: 270 translated, 270 pass spirv-val (6 mesh fixtures not built by build.py)
+check.py:   176 of 211 pass, 35 skipped (0 failures)
+run_gpu_tests.py (native): 192/241 passed, 48 skipped, 1 failed
+run_gpu_tests.py (LEONIDA_W64_EMULATE=1 --filter w64): 25/26 passed, 1 skipped (0 failures)
+ctest:      263/265 passed (2 known failures: d3d12_vulkan_device, d3d12_depth_resolve); 8/8 D3D12 shader tests passed after rebuilding with llvm-mc
+Failed:     ms_wave_info_s3: at (0,0) got (-1.0000,-1.0000,-1.0000,-1.0000), want (0.0078,0.0078,0.5,1.0) — known issue, PR #8608.
+Skipped:    35/48 skips are 64-wide subgroup / mesh / D3D12-delegated tests.
+```
+
+Setup: `cmake -S runtime -B runtime/build -DLLVM_MC=<path-to-llvm-mc.exe>`; `cmake --build runtime/build --config RelWithDebInfo --parallel`.
+All 8 D3D12 shader tests (`d3d12_translated_draw`, `d3d12_m2_textured`, `d3d12_m2_formats`, `d3d12_m3_frame`, `d3d12_m3_first_pass`, `d3d12_m4_compute`, `d3d12_buffer_uav`, `d3d12_subgroup`) passed 8/8.
+
+AI-assisted: built `main` at `5d74c2723`, ran `ctest`, `build.py`, `check.py`, and `run_gpu_tests.py` on this GPU with synthetic inputs only (no game files).
