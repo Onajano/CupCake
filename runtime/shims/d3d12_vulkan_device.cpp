@@ -57,6 +57,8 @@
 #include <cwchar>
 #include <vector>
 
+#include "ffx_upscale.h"
+
 namespace rt::d3d12 {
 namespace {
 
@@ -5120,6 +5122,9 @@ public:
                                                                   info.conditional_rendering, info.ray_tracing,
                                                                   info.xdxr_acceleration_structures &&
                                                                       info.buffer_device_address);
+        // RT-344: the PC upscaler's replay hooks, set before any list can reach replay.
+        if (rt::ffx_upscale::enabled())
+            rt::ffx_upscale::install(*state_.context, info.device, info.physical, get_device);
         if (info.physical && state_.format_properties) {
             state_.context->set_color_attachment_format(
                 [physical = info.physical, get_props = state_.format_properties](VkFormat format) {
@@ -5464,6 +5469,7 @@ public:
     }
 
     ~Device() override {
+        if (state_.context) rt::ffx_upscale::uninstall(state_.info.device);   // its contexts use this device
         if (state_.context) {
             {
                 std::lock_guard lock(state_.context->submit_mutex());
@@ -9405,6 +9411,7 @@ HRESULT create_vulkan_device_standalone(REFIID riid, void** out, QueueTestSettin
     VkPhysicalDeviceProperties chosen{};
     bool chosen_bc = false;
     VkPhysicalDeviceFeatures chosen_features{};
+    VkPhysicalDeviceVulkan11Features chosen11{};
     VkPhysicalDeviceVulkan12Features chosen12{};
     bool chosen_draw_params = false;
     leonida::Vulkan13Features v13, candidate13;
@@ -9438,6 +9445,7 @@ HRESULT create_vulkan_device_standalone(REFIID riid, void** out, QueueTestSettin
                 chosen = props;
                 chosen_bc = bc;
                 chosen_features = features.features;
+                chosen11 = f11;
                 chosen12 = f12;
                 chosen_draw_params = draw_params;
                 v13.choose(candidate13);
@@ -9558,6 +9566,18 @@ HRESULT create_vulkan_device_standalone(REFIID riid, void** out, QueueTestSettin
     enable12.bufferDeviceAddress = info.buffer_device_address ? VK_TRUE : VK_FALSE;
     info.storage_buffer_8bit = chosen12.storageBuffer8BitAccess == VK_TRUE;
     enable12.storageBuffer8BitAccess = info.storage_buffer_8bit;
+    // RT-344: the core features AMD's upscaler shaders declare, each where the GPU has it (measured under the
+    // validation layer with FSR 4.1.2 on RDNA4: 16-bit storage, variable pointers, int8 and float16, the Vulkan memory
+    // model with device scope).
+    if (rt::ffx_upscale::enabled()) {
+        enable11.storageBuffer16BitAccess = chosen11.storageBuffer16BitAccess;
+        enable11.variablePointersStorageBuffer = chosen11.variablePointersStorageBuffer;
+        enable11.variablePointers = chosen11.variablePointers;
+        enable12.shaderInt8 = chosen12.shaderInt8;
+        enable12.shaderFloat16 = chosen12.shaderFloat16;
+        enable12.vulkanMemoryModel = chosen12.vulkanMemoryModel;
+        enable12.vulkanMemoryModelDeviceScope = chosen12.vulkanMemoryModelDeviceScope;
+    }
     // Where the GPU has them: what the bindless set 0 needs (VulkanDeviceInfo::bindless), and the sampler features
     // D3D12 samplers can ask for.
     info.bindless = chosen12.runtimeDescriptorArray && chosen_features.shaderSampledImageArrayDynamicIndexing &&
@@ -9788,6 +9808,35 @@ HRESULT create_vulkan_device_standalone(REFIID riid, void** out, QueueTestSettin
             *v13.next() = &shader_clock;
         }
     }
+    // RT-344: with LEONIDA_FFX_PC=1, the extensions AMD's upscaler shaders use (leonida::ffx_vk::
+    // wanted_device_extensions), each the GPU has, with all its features; without them the validation layer reports
+    // its shader modules (VUID-VkShaderModuleCreateInfo-pCode-08740/08742).
+    std::vector<const char*> ffx_extensions;
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR ffx_derivatives{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR ffx_matrices{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
+#ifdef VK_EXT_SHADER_FLOAT8_EXTENSION_NAME
+    VkPhysicalDeviceShaderFloat8FeaturesEXT ffx_float8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
+#endif
+    if (rt::ffx_upscale::enabled()) {
+        void* const features[] = {&ffx_derivatives, &ffx_matrices,
+#ifdef VK_EXT_SHADER_FLOAT8_EXTENSION_NAME
+                                  &ffx_float8
+#else
+                                  nullptr
+#endif
+        };
+        static_assert(std::size(features) == std::size(leonida::ffx_vk::wanted_device_extensions));
+        for (std::size_t i = 0; i < std::size(features); ++i) {
+            if (!features[i] || !has_device_extension(leonida::ffx_vk::wanted_device_extensions[i])) continue;
+            auto* feature = static_cast<VkBaseOutStructure*>(features[i]);
+            VkPhysicalDeviceFeatures2 query{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, feature};
+            vkGetPhysicalDeviceFeatures2(info.physical, &query);   // fills in what the GPU has; all of it is enabled
+            feature->pNext = static_cast<VkBaseOutStructure*>(*v13.next());
+            *v13.next() = feature;
+            ffx_extensions.push_back(leonida::ffx_vk::wanted_device_extensions[i]);
+        }
+    }
     // What graphics PSOs may ask for: different blend state per render target, wireframe, a depth-bias clamp and
     // SRC1 blend factors. Enabled where the GPU has them; a PSO that needs a missing one is refused.
     enable.independentBlend = chosen_features.independentBlend;
@@ -9913,6 +9962,7 @@ HRESULT create_vulkan_device_standalone(REFIID riid, void** out, QueueTestSettin
 #ifdef VK_KHR_SHADER_FMA_EXTENSION_NAME
     if (info.shader_fma) device_extensions.push_back(VK_KHR_SHADER_FMA_EXTENSION_NAME);
 #endif
+    device_extensions.insert(device_extensions.end(), ffx_extensions.begin(), ffx_extensions.end());
     if (info.shader_subgroup_clock || info.shader_device_clock)
         device_extensions.push_back(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
     if (calibrated) device_extensions.push_back(calibrated);

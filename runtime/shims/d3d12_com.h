@@ -216,6 +216,11 @@ enum class QueueTestSettings { apply, ignore };
 HRESULT create_vulkan_device_standalone(REFIID riid, void** out,
                                         QueueTestSettings queue_test_settings = QueueTestSettings::apply);
 
+// RT-344: records `upscale` into an open list of the layer (the FFX shim's ffxDispatch); false for another list, a
+// bundle or copy list, a closed list or an Upscale without its required images and sizes. Its context is one of
+// rt::ffx_upscale (shims/ffx_upscale.h).
+bool record_upscale(ID3D12GraphicsCommandList* list, const leonida::Upscale& upscale);
+
 // Tells a device from create_vulkan_device* that `outer` (the Xbox-ABI proxy that owns it) is what its children's
 // GetDevice must return. No reference is taken: the outer object owns the device. `outer` may be the proxy's
 // IDXGIDevice1 pointer (what create_device_proxy returns for that IID); the proxy itself becomes the outer. For a

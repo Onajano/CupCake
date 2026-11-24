@@ -1404,6 +1404,13 @@ public:
         };
     }
 
+    // RT-344: the upscaler's hooks for Upscale commands (ReplayFunctions::upscale_ready, upscale). Replay reads them
+    // without a lock, so they are set once, before the device is handed out (shims/ffx_upscale.cpp).
+    void set_upscaler(std::function<bool(std::uint64_t)> ready, decltype(ReplayFunctions::upscale) record) {
+        replay_.upscale_ready = std::move(ready);
+        replay_.upscale = std::move(record);
+    }
+
     // Copies the replay stages through a buffer (depth <-> colour, vulkan_replay.h) take device-local scratch from
     // `allocate`. Without this such a copy is refused as unsupported.
     void enable_copy_scratch(PFN_vkGetDeviceProcAddr get, ScratchBuffers::Allocate allocate) {
@@ -1509,6 +1516,8 @@ public:
 
     // Vulkan requires external synchronisation of a VkQueue; every D3D12 queue of the device may share one.
     std::mutex& submit_mutex() { return submit_mutex_; }
+    // Held by a queue from recording a batch until it is submitted (lock order: tracker, then submit).
+    std::mutex& tracker_mutex() { return tracker_mutex_; }
 
     void mark_device_lost() noexcept {
         device_lost_.store(true, std::memory_order_release);
@@ -2542,7 +2551,8 @@ private:
         for (const CommandList* list : lists)
             for (const auto& command : list->commands())
                 runs_shaders |= std::holds_alternative<Dispatch>(command) || std::holds_alternative<Draw>(command) ||
-                                std::holds_alternative<ExecuteIndirect>(command);
+                                std::holds_alternative<ExecuteIndirect>(command) ||
+                                std::holds_alternative<Upscale>(command);
         std::vector<ResourceId> storage_images;
         std::vector<VulkanContext::PendingZero> zero_buffers;
         {

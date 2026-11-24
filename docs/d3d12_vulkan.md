@@ -4196,6 +4196,51 @@ on a PC device behind the Xbox-ABI proxy). Measured:
     that path (measured with `fsr_dispatch_test` and `LEONIDA_FSR_NO_STANDIN=1`).
   - `xmem.dll!XMemGetWorkingSetStatistics` takes two arguments, `(0x20000001, stats*)`, at all seven call sites;
     the one-argument shim wrote through the constant. Fixed in `runtime/shims/xmem.cpp`.
+- **AMD's PC upscaler instead of the translated one (RT-344).** The same five FFX calls can be answered by AMD's
+  signed `amd_fidelityfx_loader_vk.dll` from the public FidelityFX SDK (v2.4.0: `Kits/FidelityFX/signedbin`), on the
+  layer's own `VkDevice`. Since SDK 2.4.0 the upscaler's Vulkan backend is at feature parity with DX12, so this needs
+  no D3D12 device. `runtime/src/ffx_vk_backend.{h,cpp}` loads it (from `LEONIDA_FFX_DIR`, else next to the program),
+  creates the upscale context with the Vulkan backend descriptor in place of the console one, reports the provider
+  the loader chose, and passes dispatches through with `VkImage` resources and a `VkCommandBuffer`. The loader picks
+  the newest upscaler the GPU and driver support, which is not a split by architecture alone. Measured with `ffx_vk_dispatch_test` (procedural inputs, the game's context
+  flags, 30 frames; 1280x720 to 1920x1080, the console DLL's one configuration, and 1920x1080 to 3840x2160) under
+  Wine 11.22 on RADV (Mesa 26.3.1), every square of the checkerboard right and no non-finite value:
+  - RX 9070 XT (RDNA4): providers 4.1.2, 3.1.6 and 2.3.4; the context gets **FSR 4.1.2**; 0.41 ms per upscale to
+    1080p and 1.22 ms to 4K (submit and wait).
+  - Ryzen 7 9800X3D iGPU (RDNA2, 2 CUs): providers 3.1.6 and 2.3.4; the context gets FSR 3.1.6; 10.1 ms to 1080p and
+    35.3 ms to 4K. FSR 3.1.6 also on AMD's Windows driver 32.0.21030.2001 (`whattheflop`) and on an RTX 3080 Ti
+    under Wine (`Kev-Ball`), both at 1280x720 to 2560x1440 (#4999).
+  - On native Windows (#4999): an **RX 7600** (RDNA3, gfx1102) with AMD's driver 26.11.2 gets **FSR 4.1.2**, 4.56 ms
+    to 1080p and 16.98 ms to 4K, every square right, no validation error of the test's own (`RSK2707X`). An RTX 4080
+    (driver 621.01, `CryingLaughing`) and an RTX 5070 Ti (`Kam471`) get FSR 3.1.6, every square right. An **RX 9060 XT**
+    (RDNA4) with AMD's driver 26.10.1 offers all three wanted extensions and gets **FSR 4.1.2**: 1.27 ms to 1080p and
+    4.16 ms to 4K (`amarovndres`, #5139).
+  - **Device extensions.** The shaders run without any, but they use some: FSR 3.1 compute-shader derivatives, FSR 4
+    also cooperative matrices and 8-bit floats. Without the extensions the validation layer reports
+    `VUID-VkShaderModuleCreateInfo-pCode-08740`/`-08742` (on Windows and on RADV). The device must enable those of
+    `ffx_vk::wanted_device_extensions` it has, as AMD's own sample device does; the test does, and on the iGPU the
+    validation layer is then silent. FSR 4.1.2 on the RX 9070 XT still reports errors in AMD's own shaders, which no
+    device setup removes: they declare `SPV_NV_cooperative_matrix2`, which RADV does not offer on that GPU, spirv-val
+    rejects an `OpFConvert` on cooperative-matrix types and an `OpStore` to an image, and three storage images
+    (`rw_reprojected_color`, `rw_history_color`, `rw_mlsr_output_color`) get a 3-component `OpImageWrite` on an
+    RGBA16F view. With `LEONIDA_VK_VALIDATION=1` the test fails on any other validation error.
+  - The five FSR 4.1.2 shader errors above appear on AMD's Windows driver too (RX 9060 XT, RX 7600), so they are in
+    AMD's shaders, not a RADV quirk. AMD's DLLs are not in the repository; their licence allows redistribution in binary
+    form and forbids reverse engineering.
+- **In the layer: the Upscale command.** With `LEONIDA_FFX_PC=1` (off by default) a device of the Vulkan layer
+  enables the extensions above and the core features the shaders declare (16-bit storage, variable pointers, int8,
+  float16, the Vulkan memory model with device scope; each where the GPU has it), and installs replay hooks
+  (`shims/ffx_upscale.cpp`). `rt::ffx_upscale::create` makes an upscale context on the device;
+  `rt::d3d12::record_upscale` records a `leonida::Upscale` (the `FfxDispatchDescUpscale` fields, the images as
+  resource ids) into a direct or compute list. At `ExecuteCommandLists`, replay moves each input to the
+  NON_PIXEL_SHADER_RESOURCE layout and the output to the UAV layout through the layout tracker, records the upscale
+  into the replay's command buffer and moves every image back. An Upscale whose context was destroyed by then is
+  skipped; `destroy` waits for the device to go idle under the submit lock first. `d3d12_ffx_upscale_test` runs it
+  end to end (30 upscales of a checkerboard, 1280x720 to 1920x1080) under Wine on RADV: RX 9070 XT FSR 4.1.2,
+  0.49 ms per execute and wait; 9800X3D iGPU FSR 3.1.6, 10.1 ms; every square right. Under the validation layer
+  with synchronization validation, the layer reports nothing; what remains are FSR 4.1.2's own shader errors listed
+  above, and storage-image format warnings on FSR's internal images (`rw_recurrent_0`, `rw_accumulation`, ...).
+  Not yet done: the shim that answers the game's five FFX calls and records these commands.
 
 ### A.4 Other DLLs and the executable
 

@@ -651,12 +651,30 @@ struct AccelerationStructurePostbuild {
     std::vector<std::uint64_t> sources;
 };
 
+// One upscale through AMD's PC FidelityFX upscaler (RT-344), recorded where the title's ffxDispatch was. Replay moves
+// each image to the layout the upscaler reads it in, records the upscale into the replay's command buffer through
+// the hook the upscaler installs (ReplayFunctions::upscale), and moves the images back. `context` names an upscale
+// context of that hook; one that is gone by replay skips the command. The fields are FfxDispatchDescUpscale's.
+struct Upscale {
+    std::uint64_t context = 0;
+    ResourceId color = 0, depth = 0, motion_vectors = 0, output = 0;            // required
+    ResourceId exposure = 0, reactive = 0, transparency_and_composition = 0;    // optional
+    float jitter_x = 0, jitter_y = 0;
+    float motion_vector_scale_x = 0, motion_vector_scale_y = 0;
+    std::uint32_t render_width = 0, render_height = 0, upscale_width = 0, upscale_height = 0;
+    bool enable_sharpening = false;
+    float sharpness = 0, frame_time_delta = 0, pre_exposure = 1;
+    bool reset = false;
+    float camera_near = 0, camera_far = 0, camera_fov_vertical = 0, view_space_to_meters = 1;
+    std::uint32_t flags = 0;
+};
+
 using Command = std::variant<TransitionBarrier, UavBarrier, AliasingBarrier, GlobalBarrier, BufferBarrier,
                              TextureBarrier, ClearRenderTarget, ClearDepthStencil, CopyBuffer, CopyTexture,
                              CopyResource, ResolveSubresource, Predication, ClearUnorderedAccess, DiscardResource,
                              WriteImmediate, AtomicCopyBuffer, BeginQuery, EndQuery, ResolveQueries, DebugMarker,
                              ExecuteIndirect, BuildAccelerationStructure, Dispatch, Draw, CopyAccelerationStructure,
-                             AccelerationStructurePostbuild>;
+                             AccelerationStructurePostbuild, Upscale>;
 
 class CommandList {
 public:
@@ -877,6 +895,13 @@ public:
         if (indirect.count_buffer && indirect.count_offset % 4) return false;
         if (!indirect.max_count) return !closed_;  // the PC runtime takes MaxCommandCount 0 as a no-op
         return append(indirect);
+    }
+
+    bool upscale(const Upscale& u) {
+        if (!u.context || !u.color || !u.depth || !u.motion_vectors || !u.output || !u.render_width ||
+            !u.render_height || !u.upscale_width || !u.upscale_height)
+            return false;
+        return append(u);
     }
 
     // D3D12: acceleration structures and build scratch are 256-byte aligned; postbuild destinations 8-byte aligned.
