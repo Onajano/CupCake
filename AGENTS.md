@@ -41,7 +41,7 @@ loader that maps the game's executable and resolves its imports to shims. Nothin
   number:
 
   ```sh
-  gh issue list -R ItsNotRexed/Leonida --state open --search "Coordinating who works on what in:title"
+  gh issue list -R ubiquitarianism/leonida --state open --search "Coordinating who works on what in:title"
   ```
 
   With no `gh` auth, the search link in [CONTRIBUTING.md](CONTRIBUTING.md) works in a browser; say so when you cannot
@@ -54,8 +54,13 @@ loader that maps the game's executable and resolves its imports to shims. Nothin
   Post it in the coordination issue as `finding: <one line>`, followed by where it is (file and line), why it matters,
   and whether it needs game files or particular hardware. The coordinator checks it and lists it for others.
 - For the D3D12 → Vulkan layer (`runtime/shims/d3d12_*`, `runtime/src/vulkan_*`), also read
-  [#313](https://github.com/ItsNotRexed/Leonida/issues/313): most of that work builds on a few open pull requests,
-  and it lists which D3D12 methods are still open.
+  [docs/d3d12_vulkan.md](docs/d3d12_vulkan.md) and the open pull requests: most of that work builds on a few of
+  them. The page that tracked it, #313, was in the original repository and is gone.
+- The original repository (`ItsNotRexed/Leonida`) went private on 23 November 2026. A `#N` written before that is
+  an old number and links nowhere: do not cite one as if it could be read, and do not run `gh` against that
+  repository. The old open issues are indexed by title in
+  [#18](https://github.com/ubiquitarianism/leonida/issues/18) and the old open pull requests are kept as
+  `old-pr/<old number>` branches ([#17](https://github.com/ubiquitarianism/leonida/issues/17)).
 
 ## Before you guess, look
 

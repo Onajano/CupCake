@@ -15,14 +15,27 @@ Thanks for helping. A few rules keep the project safe to host:
 Claim the work in [the coordination issue][claims] first: the open issue titled "Coordinating who works on what" (it
 moves to a new issue when the thread gets long, so the link searches for it). Check its tables and the open pull
 requests, post `claiming: <ID>` there (or a one-line description for something not listed yet), and put the ID in
-your pull request. Found something that needs doing but won't do it yourself? Post `finding: <one line>` there, with
-where it is and why it matters, and it goes on the list for others. When two pull requests overlap anyway, the one
-that lands first is merged and the other is asked to rebase or close. GPU test results go in
-[#166](https://github.com/ItsNotRexed/Leonida/issues/166). Work on the D3D12 → Vulkan layer has its own page,
-[#313](https://github.com/ItsNotRexed/Leonida/issues/313): the critical path, who builds what, and which D3D12
-methods are still open.
+your pull request. When the pull request is open, post `done: <ID> -> #<PR>` there. Found something that needs doing
+but won't do it yourself? Post `finding: <one line>` there, with where it is and why it matters, and it goes on the
+list for others. When two pull requests overlap anyway, the one that lands first is merged and the other is asked to
+rebase or close. Pull requests target `main`.
 
-[claims]: https://github.com/ItsNotRexed/Leonida/issues?q=is%3Aissue%20is%3Aopen%20in%3Atitle%20%22Coordinating%20who%20works%20on%20what%22
+The original repository (`ItsNotRexed/Leonida`) went private on 23 November 2026, and its issues and pull requests
+went with it. A `#N` in the docs, in a code comment or in a commit message from before that date is an **old**
+number and links nowhere now, including the two this page used to send you to: #166 (GPU test results) and #313
+(the D3D12 → Vulkan page).
+
+- The titles of the issues that were open there are indexed in
+  [#18](https://github.com/ubiquitarianism/leonida/issues/18). To carry one on, open it again here and link the
+  index.
+- The pull requests that were open there are kept as `old-pr/<old number>` branches, listed in
+  [#17](https://github.com/ubiquitarianism/leonida/issues/17). To carry one on, rebase it on `main`, keep its
+  author's commits and open a pull request here.
+- A GPU test result is a pull request that adds a file to [`gpu-test-results/`](gpu-test-results) in the format of
+  the files there; [docs/testing.md](docs/testing.md) has how to run the tests.
+- The plan and status of the D3D12 → Vulkan layer are in [docs/d3d12_vulkan.md](docs/d3d12_vulkan.md).
+
+[claims]: https://github.com/ubiquitarianism/leonida/issues?q=is%3Aissue%20is%3Aopen%20in%3Atitle%20%22Coordinating%20who%20works%20on%20what%22
 
 ## Working on the code
 

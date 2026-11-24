@@ -28,11 +28,25 @@ l'issue, en précisant où se trouve le problème et pourquoi il compte. La tâc
 d'autre. Si deux pull requests se recoupent malgré tout, celle qui arrive en premier est fusionnée et l'autre doit
 être rebasée ou fermée.
 
-Les résultats des tests GPU vont dans l'[issue #166](https://github.com/ItsNotRexed/Leonida/issues/166). Le travail
-sur la couche D3D12 → Vulkan a sa propre page, l'[issue #313](https://github.com/ItsNotRexed/Leonida/issues/313) :
-on y trouve le chemin critique, qui construit quoi, et les méthodes D3D12 qui restent à faire.
+Une fois la pull request ouverte, publiez `done: <ID> -> #<PR>` dans l'issue. Les pull requests visent `main`.
 
-[claims]: https://github.com/ItsNotRexed/Leonida/issues?q=is%3Aissue%20is%3Aopen%20in%3Atitle%20%22Coordinating%20who%20works%20on%20what%22
+Le dépôt d'origine (`ItsNotRexed/Leonida`) est devenu privé le 23 novembre 2026, avec ses issues et ses pull
+requests. Un `#N` écrit avant cette date dans la documentation, un commentaire de code ou un message de commit est
+un **ancien** numéro et ne mène plus nulle part, y compris les deux vers lesquels cette page renvoyait : #166
+(résultats des tests GPU) et #313 (la page de la couche D3D12 → Vulkan).
+
+- Les titres des issues qui y étaient ouvertes sont répertoriés dans
+  [#18](https://github.com/ubiquitarianism/leonida/issues/18). Pour en reprendre une, rouvrez-la ici avec un lien
+  vers cet index.
+- Les pull requests qui y étaient ouvertes sont conservées dans des branches `old-pr/<ancien numéro>`, listées dans
+  [#17](https://github.com/ubiquitarianism/leonida/issues/17). Pour en reprendre une, rebasez-la sur `main`,
+  gardez les commits de son auteur et ouvrez une pull request ici.
+- Un résultat de test GPU est une pull request qui ajoute un fichier dans
+  [`gpu-test-results/`](../../../gpu-test-results), au format des fichiers qui s'y trouvent ;
+  [docs/testing.md](../../testing.md) explique comment lancer les tests.
+- Le plan et l'état de la couche D3D12 → Vulkan sont dans [docs/d3d12_vulkan.md](../../d3d12_vulkan.md).
+
+[claims]: https://github.com/ubiquitarianism/leonida/issues?q=is%3Aissue%20is%3Aopen%20in%3Atitle%20%22Coordinating%20who%20works%20on%20what%22
 
 ## Travailler sur le code
 
