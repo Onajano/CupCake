@@ -13343,10 +13343,12 @@ class Gen:
             sp, smp, si = self.tmp(), self.tmp(), self.tmp()
             self.dynamic_sampled_access(sp, "%_ptr_UC_smp", "%samplers", smp_idx)
             self.emit(f"{smp} = OpLoad %smp {sp}")
-            typed_implicit = op == "image_sample" and self.stage == "ps" and dim == "dim:SQ_RSRC_IMG_2D"
-            # An explicit-LOD sample has the same shape in every dimension, so it takes the typed read too:
+            # Every image_sample form has the same shape in every dimension, so each takes the typed read:
             # image_read_typed picks the UINT/SINT alias of the dimension's sampled binding (image_load does).
-            typed_sample = typed_implicit or op in ("image_sample_l", "image_sample_lz")
+            # The implicit form uses the quad derivatives as Grad in the pixel stage and LOD 0 elsewhere, where
+            # there are no derivatives.
+            typed_implicit = op == "image_sample" and self.stage == "ps"
+            typed_sample = op in ("image_sample", "image_sample_l", "image_sample_lz")
 
             def sampled_image(image, cls, di=0):
                 sampled = self.tmp()
@@ -13586,10 +13588,20 @@ class Gen:
                 di = self.STORE_DIMS[view_dim][0]
                 operands = f"Lod {lod}"
                 if typed_implicit:
-                    # Compute the quad gradients before the per-image format branch.
+                    # Compute the quad gradients before the per-image format branch. Grad takes the coordinates
+                    # the dimension samples: scalar for 1D, three components for 3D, two for 2D, 2D-array and
+                    # cube (an array layer is not differentiated), and OpDPdx needs the very vector it
+                    # differentiates.
+                    if grad_width == 1:
+                        gsrc, gty = uv, "%float"
+                    elif ncoord == grad_width:
+                        gsrc, gty = uv, f"%v{grad_width}float"
+                    else:
+                        gsrc, gty = self.tmp(), f"%v{grad_width}float"
+                        self.emit(f"{gsrc} = OpCompositeConstruct {gty} {f[0]} {f[1]}")
                     dx, dy = self.tmp(), self.tmp()
-                    self.emit(f"{dx} = OpDPdx %v2float {uv}")
-                    self.emit(f"{dy} = OpDPdy %v2float {uv}")
+                    self.emit(f"{dx} = OpDPdx {gty} {gsrc}")
+                    self.emit(f"{dy} = OpDPdy {gty} {gsrc}")
                     operands = f"Grad {dx} {dy}"
 
                 def sample(image, cls, ty):

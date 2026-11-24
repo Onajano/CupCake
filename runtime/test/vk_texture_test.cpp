@@ -5,9 +5,10 @@
 // registers that T# -> image index 1 and the shader's literal S# -> sampler index 1, binds an 8x8 gradient at
 // index 1 and a magenta fallback at index 0, draws a full-screen triangle and dumps the RGBA32F result.
 //
-//   vk_texture_test <vs.spv> <fs.spv> <out.raw> <ptr_sgpr> <s0> <s1> <s2> <s3> [--two-mip|--two-mip-sint|--two-mip-uint]   (S# words as hex)
+//   vk_texture_test <vs.spv> <fs.spv> <out.raw> <ptr_sgpr> <s0> <s1> <s2> <s3> [--two-mip|--two-mip-sint|--two-mip-uint|--two-mip-array-uint]   (S# words as hex)
 //   --two-mip: expose a 128x128 quadrant texture and its solid cyan mip 1 to the 64x64 draw; the SINT and UINT
-//   forms bind the same image as a signed or unsigned integer view instead of the default UNORM one.
+//   forms bind the same image as a signed or unsigned integer view instead of the default UNORM one, and the
+//   ARRAY form binds the unsigned image as a one-layer 2D_ARRAY view at binding 3 (non-2D implicit sample).
 //   vk_texture_test cube [out.raw]: ps_cube_sample against two 8x8 cubes, a 12-layer 2D array at binding 3 (the
 //   translator's view of a cube array); every pixel must be the texel a cube sample of its direction reads.
 //   vk_texture_test dref [out.raw]: ps_sample_c_lz against an 8x8 D32 texture at index 1 (texel x holds depth
@@ -88,7 +89,8 @@ int main(int argc, char** argv) {
     const uint32_t W = 64, H = 64, TW = 8;
     const bool signed_mips = argc == 10 && std::strcmp(argv[9], "--two-mip-sint") == 0;
     const bool uint_mips = argc == 10 && std::strcmp(argv[9], "--two-mip-uint") == 0;
-    const bool two_mip = signed_mips || uint_mips || (argc == 10 && std::strcmp(argv[9], "--two-mip") == 0);
+    const bool array_mips = argc == 10 && std::strcmp(argv[9], "--two-mip-array-uint") == 0;
+    const bool two_mip = signed_mips || uint_mips || array_mips || (argc == 10 && std::strcmp(argv[9], "--two-mip") == 0);
     // With vs_ids spanning UV [0,1] over the viewport, adjacent fragments differ by two base texels.
     const uint32_t texture_side = two_mip ? 2 * W : TW;
     const uint32_t levels = two_mip ? 2 : 1;
@@ -143,13 +145,13 @@ int main(int argc, char** argv) {
         if (dref)
             ssharp[0] |= 3u << 12;              // the shader's S#: DEPTH_COMPARE_FUNC = LESSEQUAL
     } else {
-        std::fprintf(stderr, "usage: vk_texture_test [cube|dref|dref_a16|dref_c|dref_c_b|fetch-uint|fetch-sint|fetch-miss] [out] | vs fs out ptr_sgpr s0 s1 s2 s3 [--two-mip|--two-mip-sint|--two-mip-uint]\n");
+        std::fprintf(stderr, "usage: vk_texture_test [cube|dref|dref_a16|dref_c|dref_c_b|fetch-uint|fetch-sint|fetch-miss] [out] | vs fs out ptr_sgpr s0 s1 s2 s3 [--two-mip|--two-mip-sint|--two-mip-uint|--two-mip-array-uint]\n");
         return 2;
     }
     // Word 1 also selects the numeric type when the shader fetches through this key. Word 3 keeps BASE_LEVEL [15:12]
     // at 0, as the views here start at level 0: image_get_resinfo minifies a 2D array's layers from BASE_LEVEL.
     const VkFormat sampled_format = dref ? VK_FORMAT_D32_SFLOAT :
-        (uint_mips || fetch_uint) ? VK_FORMAT_R8G8B8A8_UINT :
+        (uint_mips || array_mips || fetch_uint) ? VK_FORMAT_R8G8B8A8_UINT :
         (signed_mips || fetch) ? VK_FORMAT_R8G8B8A8_SINT : VK_FORMAT_R8G8B8A8_UNORM;
     uint32_t tsharp[8] = {0x11111111, leonida::gfx10::format_from_vulkan(sampled_format) << 20, 0x33333333, 0x44440444,
                           0x55555555, 0x66666666, 0x77777777, 0x88888888};
@@ -391,7 +393,14 @@ int main(int argc, char** argv) {
     CHECK(make_tex(1, 1, 1, 1, VK_IMAGE_VIEW_TYPE_2D, tfmt[0], &timg[0], &tview[0]));
     CHECK(make_tex(texture_side, texture_side, levels, 1, VK_IMAGE_VIEW_TYPE_2D, tfmt[1], &timg[1], &tview[1]));
     CHECK(make_tex(1, 1, 1, 1, VK_IMAGE_VIEW_TYPE_2D_ARRAY, tfmt[2], &timg[2], &tview[2]));
-    CHECK(make_tex(TW, TW, 1, CUBE_LAYERS, VK_IMAGE_VIEW_TYPE_2D_ARRAY, tfmt[3], &timg[3], &tview[3]));
+    if (array_mips) {   // The same unsigned image as a one-layer 2D_ARRAY view for the non-2D implicit sample.
+        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image = timg[1]; vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY; vi.format = tfmt[1];
+        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1};
+        CHECK(vkCreateImageView(dev, &vi, nullptr, &tview[3]));
+    } else {
+        CHECK(make_tex(TW, TW, 1, CUBE_LAYERS, VK_IMAGE_VIEW_TYPE_2D_ARRAY, tfmt[3], &timg[3], &tview[3]));
+    }
     VkBuffer up; VkDeviceMemory upm; void* upp;
     const VkDeviceSize texture_offset = 256;
     const VkDeviceSize texture_bytes = texels.size() * sizeof(uint32_t);
@@ -528,6 +537,7 @@ int main(int argc, char** argv) {
     const VkDeviceSize up_offset[4] = {0, texture_offset, 0, cube_offset};
     const uint32_t up_size[4] = {1, texture_side, 1, TW}, up_layers[4] = {1, 1, 1, CUBE_LAYERS};
     for (int t = 0; t < 4; t++) {
+        if (array_mips && t == 3) continue;   // binding 3 views timg[1] here, there is no cube image to upload.
         VkImageMemoryBarrier ib{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; ib.image = timg[t];
         const uint32_t mip_levels = t == 1 ? levels : 1;

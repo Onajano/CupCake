@@ -570,6 +570,7 @@ TEXOFF_ARGS = ("2", "92", "0", "0", "0")              # ps_texoff: T# pointer in
 TEXTURE_MIP_TEST = "ps_texture_mip0"
 SIGNED_MIP_TEST = "ps_sample_implicit_sint"
 UINT_MIP_TEST = "ps_sample_implicit_uint"
+ARRAY_MIP_TEST = "ps_sample_implicit_uint_array"
 GATHER_LOD_TEST = "ps_gather_sampler_lod"
 TEXTURE_MIP_DEPENDENCIES = ("vs_ids", "ps_texture_sample")
 # Each pair of draws expects mip 0, then mip 1. S# word 1 is minLOD[11:0], maxLOD[23:12], unsigned 4.8.
@@ -578,9 +579,12 @@ MIP_TEST_PASSES = {
     GATHER_LOD_TEST: ((GATHER_LOD_TEST, "40000"), (GATHER_LOD_TEST, "1000c0")),
     SIGNED_MIP_TEST: ((SIGNED_MIP_TEST, "0"), (SIGNED_MIP_TEST, "100000")),
     UINT_MIP_TEST: ((UINT_MIP_TEST, "0"), (UINT_MIP_TEST, "100000")),
+    ARRAY_MIP_TEST: ((ARRAY_MIP_TEST, "0"), (ARRAY_MIP_TEST, "100000")),
 }
 # The integer fixtures sample the same two-mip image through the signed or unsigned view the harness binds for them.
-MIP_TEST_MODES = {SIGNED_MIP_TEST: "--two-mip-sint", UINT_MIP_TEST: "--two-mip-uint"}
+# The ARRAY fixture uses a one-layer 2D_ARRAY view of the unsigned image, the non-2D typed implicit path.
+MIP_TEST_MODES = {SIGNED_MIP_TEST: "--two-mip-sint", UINT_MIP_TEST: "--two-mip-uint",
+                  ARRAY_MIP_TEST: "--two-mip-array-uint"}
 
 # TEST-184: vk_store_test "words" fills the r32 uint image with 100 + i, the r32 sint image with -2i (texel
 # i = 8y + x) and the r32 uint volume with 200 + i (texel i = 16z + 4y + x), and prints the three after the dispatch.
