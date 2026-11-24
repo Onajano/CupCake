@@ -97,6 +97,7 @@ struct ResourceBinding {
     bool sampled = false;              // has SAMPLED usage (no DENY_SHADER_RESOURCE): the present compose pass reads it
     bool host_readable = false;        // D3D12_HEAP_TYPE_READBACK (or CUSTOM write-back): needs host-read flush
     bool sparse_buffer = false;
+    std::uint64_t swapchain_image_address = 0;  // the T# address of a shader-input back buffer
 };
 
 struct VulkanAccess {

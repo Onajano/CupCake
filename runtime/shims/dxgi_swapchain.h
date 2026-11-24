@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <vector>
 
@@ -129,13 +130,7 @@ public:
         }
     }
 
-    ~VulkanSwapchain() {
-        destroy_swapchain();
-        if (blit_pool_) fn_.destroy_cmd_pool(device_, blit_pool_, nullptr);
-        if (surface_) fn_.destroy_surface(instance_, surface_, nullptr);
-        if (acquire_fence_) fn_.destroy_fence(device_, acquire_fence_, nullptr);
-        if (blit_fence_) fn_.destroy_fence(device_, blit_fence_, nullptr);
-    }
+    ~VulkanSwapchain() { close(); }
 
     VulkanSwapchain(const VulkanSwapchain&) = delete;
     VulkanSwapchain& operator=(const VulkanSwapchain&) = delete;
@@ -158,12 +153,11 @@ public:
     }
 
     bool resize(std::uint32_t width, std::uint32_t height, VkFormat preferred_format = VK_FORMAT_UNDEFINED,
-                std::uint32_t buffer_count = 0, bool allow_tearing = false) {
+                std::uint32_t buffer_count = 0, bool allow_tearing = false,
+                const std::function<void()>& retire_buffers = {}) {
         if (!loaded_ || !surface_) return false;
-        {
-            std::lock_guard lock(submit_mutex_);
-            fn_.device_wait_idle(device_);
-        }
+        wait_idle();
+        if (retire_buffers) retire_buffers();
         allow_tearing_ = allow_tearing;
         const VkFormat fmt = (preferred_format != VK_FORMAT_UNDEFINED) ? preferred_format : format_;
         const std::uint32_t count = buffer_count ? buffer_count : exposed_count_;
@@ -245,7 +239,35 @@ public:
         return b;
     }
 
+    void close(const std::function<void()>& retire_buffers = {}) {
+        if (swapchain_ || !offscreen_images_.empty()) {
+            wait_idle();
+            if (retire_buffers) retire_buffers();
+            destroy_offscreen();
+            if (swapchain_) {
+                fn_.destroy_swapchain(device_, swapchain_, nullptr);
+                swapchain_ = VK_NULL_HANDLE;
+            }
+        }
+        if (blit_pool_) fn_.destroy_cmd_pool(device_, blit_pool_, nullptr);
+        if (surface_) fn_.destroy_surface(instance_, surface_, nullptr);
+        if (acquire_fence_) fn_.destroy_fence(device_, acquire_fence_, nullptr);
+        if (blit_fence_) fn_.destroy_fence(device_, blit_fence_, nullptr);
+        blit_pool_ = VK_NULL_HANDLE;
+        blit_cmd_ = VK_NULL_HANDLE;
+        surface_ = VK_NULL_HANDLE;
+        acquire_fence_ = VK_NULL_HANDLE;
+        blit_fence_ = VK_NULL_HANDLE;
+        images_.clear();
+        exposed_count_ = 0;
+    }
+
 private:
+    void wait_idle() {
+        std::lock_guard lock(submit_mutex_);
+        fn_.device_wait_idle(device_);
+    }
+
     bool transition_image_layout(VkImage img, VkImageLayout old_layout, VkImageLayout new_layout) {
         if (!blit_cmd_ || !blit_fence_ || !img) return false;
         std::lock_guard lock(submit_mutex_);
@@ -282,20 +304,6 @@ private:
             if (mem) fn_.free_mem(device_, mem, nullptr);
         offscreen_images_.clear();
         offscreen_memory_.clear();
-    }
-
-    void destroy_swapchain() {
-        if (swapchain_ || !offscreen_images_.empty()) {
-            std::lock_guard lock(submit_mutex_);
-            fn_.device_wait_idle(device_);
-            destroy_offscreen();
-            if (swapchain_) {
-                fn_.destroy_swapchain(device_, swapchain_, nullptr);
-                swapchain_ = VK_NULL_HANDLE;
-            }
-        }
-        images_.clear();
-        exposed_count_ = 0;
     }
 
     bool create_offscreen_backbuffers(std::uint32_t count) {
