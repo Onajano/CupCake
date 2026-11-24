@@ -16642,14 +16642,28 @@ def sdwa_reads_dst(op: str, mods: list[str]) -> bool:
             and any(m.startswith(("dst_sel:BYTE_", "dst_sel:WORD_")) for m in mods))
 
 
+# Ops whose VGPR destination is also a source operand (the accumulating forms, and v_swap_b32, which reads both).
+DST_ALSO_READ = ("v_swap_b32", "v_fmac_f32", "v_mac_f32", "v_mac_legacy_f32", "v_fmac_f16", "v_dot4c_i32_i8", "v_pk_fmac_f16",
+                 "v_dot2c_f32_f16", "v_dot2c_i32_i16", "v_dot2c_u32_u16", "v_dot4c_u32_u8", "v_dot8c_i32_i4",
+                 "v_dot8c_u32_u4")
+
+
 # All VGPR operands of these instructions are sources, including store address and data ranges.
 VGPR_READ_ONLY_PREFIXES = ("exp", "buffer_store", "tbuffer_store", "image_store", "v_cmp", "ds_write",
                            "global_store", "flat_store", "scratch_store")
 
 
 def read_before_write_vgprs(insns):
-    """VGPRs a shader reads before writing them: for a fetch-calling VS these are the fetched attributes."""
-    written, first = set(), []
+    """VGPRs a shader reads before writing them: for a fetch-calling VS these are the fetched attributes.
+
+    v_writelane_b32 writes one lane and keeps the others (SHADER-768), so its destination is not written by it: the
+    kept lanes still hold what the register held at entry. They are *carried*, and become a read only when something
+    other than v_readlane_b32 reads the register before a full write (shdann's two cases on #4297: a PS whose first
+    touch of v0 is a writelane, then a v_mov of v0, reads the barycentric in the other lanes; a VS that spills an
+    SGPR into one lane of v40 around the fetch call and reads it back with v_readlane never uses the entry value,
+    so v40 is not a fetched attribute). The approximation: a v_readlane of a lane the writelane didn't write would
+    read the entry value, and is not counted."""
+    written, first, carried = set(), [], set()
     for ins in insns:
         a, op = ins["args"], ins["op"]
         if not a:
@@ -16662,17 +16676,22 @@ def read_before_write_vgprs(insns):
                 regs += range(x["r"], x["r"] + x.get("n", 1))
             elif x["k"] == "vlist":
                 regs += x["r"]
-        if (base_op(op) in ("v_swap_b32", "v_fmac_f32", "v_mac_f32", "v_mac_legacy_f32", "v_fmac_f16", "v_dot4c_i32_i8", "v_pk_fmac_f16",
-                            "v_dot2c_f32_f16", "v_dot2c_i32_i16", "v_dot2c_u32_u16", "v_dot4c_u32_u8",
-                            "v_dot8c_i32_i4", "v_dot8c_u32_u4") or
+        if (base_op(op) in DST_ALSO_READ or
                 (op.startswith(("global_load_", "buffer_load_")) and "_d16" in op and "format" not in op)) and \
                 a[0]["k"] == "vgpr":   # d16 keeps a half
             regs.append(a[0]["r"])
+        lane_read = base_op(op) == "v_readlane_b32"
         for r in regs:
-            if r not in written and r not in first:
-                first.append(r)
-        if not reads_all and a[0]["k"] == "vgpr":
-            written.update(vgpr_dest_registers(ins))
+            if r in written or r in first or (r in carried and lane_read):
+                continue
+            first.append(r)
+        if base_op(op) == "v_writelane_b32" and a[0]["k"] == "vgpr":
+            if a[0]["r"] not in written:
+                carried.add(a[0]["r"])
+        elif not reads_all and a[0]["k"] == "vgpr":
+            dst = vgpr_dest_registers(ins)
+            written.update(dst)
+            carried.difference_update(dst)
     return set(first)
 
 def interp_ij_analysis(insns, g):
@@ -16923,9 +16942,8 @@ def reg_reads_writes(insns):
                 regs += range(x["r"], x["r"] + x.get("n", 1))
             elif x["k"] == "vlist":
                 regs += x["r"]
-        if base_op(op) in ("v_swap_b32", "v_fmac_f32", "v_mac_f32", "v_mac_legacy_f32", "v_fmac_f16", "v_dot4c_i32_i8", "v_pk_fmac_f16",
-                           "v_dot2c_f32_f16", "v_dot2c_i32_i16", "v_dot2c_u32_u16", "v_dot4c_u32_u8",
-                           "v_dot8c_i32_i4", "v_dot8c_u32_u4") and a[0]["k"] == "vgpr":
+        if (base_op(op) in DST_ALSO_READ or base_op(op) == "v_writelane_b32") and a[0]["k"] == "vgpr":
+            # v_writelane_b32 keeps the other lanes: over a slice that is a read of the destination
             regs.append(a[0]["r"])
         rr.update(regs)
         if not reads_all and a[0]["k"] == "vgpr":
