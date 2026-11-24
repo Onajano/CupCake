@@ -152,7 +152,10 @@ class ManagerTests(unittest.TestCase):
             game = Path(tmp, "game")
             port.mkdir()
             game.mkdir()
-            port.joinpath("gta6rt.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+            if os.name == "nt":
+                port.joinpath("gta6rt.exe").write_bytes(b"MZ")
+            else:
+                port.joinpath("gta6rt.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             port.joinpath("game_path.txt").write_text(str(game) + "\n", encoding="utf-8")
             image = game / leonida_mods.EXPECTED_EXE
             image.write_bytes(b"MZ")
