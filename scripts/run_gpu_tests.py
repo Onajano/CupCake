@@ -663,6 +663,7 @@ OTHER_HARNESS = {"ps_m15": "d3d12_translated_draw_test", "vs_m15": "d3d12_transl
 
 # Shaders a selected test draws with, built even when the filter leaves them out (#192).
 DRAWN_WITH = {GATHER_LOD_TEST: "vs_ids.asm", "ps_flat": "vs_ids.asm", "ps_persp_bary": "vs_persp.asm", "ps_texture_sample": "vs_ids.asm", "ps_cube_sample": "vs_ids.asm",
+              "ps_sample_array_uint": "vs_ids.asm", "ps_sample_array_sint": "vs_ids.asm",
               "ps_texture_sample_d16": "vs_ids.asm", "ps_sample_c_lz": "vs_ids.asm", "ps_sample_c_lz_a16": "vs_ids.asm",
               "ps_table_fetch": "vs_ids.asm", "ps_sample_c": "vs_ids.asm", "ps_sample_c_b": "vs_ids.asm",
               **{name: "vs_ids.asm" for name in TEXTURE_CONSTANTS}, "ps_ssharp": "vs_ids.asm", "ps_imgatomic": "vs_ids.asm",
@@ -1338,7 +1339,8 @@ def run_suite(a, work: str) -> int:
             problem = texture_gradient_a16_test(a.build, spirv_dir, name)
             ok = None if isinstance(problem, Skip) else not problem
             results.append((name, ok, problem or "4096 RGBA pixels matched"))
-        elif name in ("ps_texture_sample", "ps_cube_sample", "ps_texture_sample_d16", "ps_sample_c_lz",
+        elif name in ("ps_texture_sample", "ps_cube_sample", "ps_sample_array_uint", "ps_sample_array_sint",
+                      "ps_texture_sample_d16", "ps_sample_c_lz",
                       "ps_sample_c_lz_a16", "ps_sample_c", "ps_sample_c_b"):
             # Bindless texture tests: vk_texture_test finds vs_ids.spv and the shader in its working directory.
             tool = os.path.join(a.build, "vk_texture_test" + ext)
@@ -1346,7 +1348,8 @@ def run_suite(a, work: str) -> int:
             if name == "ps_texture_sample_d16":
                 cmd = [tool, os.path.join(spirv_dir, "vs_ids.spv"), spv, raw, "0", "0", "0", "0", "0"]
             else:
-                mode = {"ps_cube_sample": ["cube"], "ps_sample_c_lz": ["dref"],
+                mode = {"ps_cube_sample": ["cube"], "ps_sample_array_uint": ["array-uint"],
+                        "ps_sample_array_sint": ["array-sint"], "ps_sample_c_lz": ["dref"],
                         "ps_sample_c_lz_a16": ["dref_a16"], "ps_sample_c": ["dref_c"],
                         "ps_sample_c_b": ["dref_c_b"]}.get(name, [])
                 cmd = [tool, *mode, raw]

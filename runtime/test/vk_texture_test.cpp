@@ -10,6 +10,9 @@
 //   forms bind the same image as a signed or unsigned integer view instead of the default UNORM one.
 //   vk_texture_test cube [out.raw]: ps_cube_sample against two 8x8 cubes, a 12-layer 2D array at binding 3 (the
 //   translator's view of a cube array); every pixel must be the texel a cube sample of its direction reads.
+//   vk_texture_test array-uint / array-sint [out.raw]: ps_sample_array_uint / ps_sample_array_sint (SHADER-1404) against
+//   the same 12-layer 8x8 array at binding 3, created as R8G8B8A8_UINT / _SINT with the T# FORMAT to match: an implicit
+//   image_sample of layer 3 must return the integer texel (32x, 32y, 60, 255), each byte read signed for SINT.
 //   vk_texture_test dref [out.raw]: ps_sample_c_lz against an 8x8 D32 texture at index 1 (texel x holds depth
 //   (x + 0.5) / 8) and a LESS_OR_EQUAL compare sampler at index 1; both of its results, f32 and d16, must be the
 //   1.0 or 0.0 the reference 0.5 gives against the texel each pixel reads.
@@ -30,6 +33,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -99,6 +103,10 @@ int main(int argc, char** argv) {
     const bool fetch_miss = argc >= 2 && !std::strcmp(argv[1], "fetch-miss");
     const bool fetch = fetch_uint || fetch_miss || (argc >= 2 && !std::strcmp(argv[1], "fetch-sint"));
     const bool cube = argc >= 2 && !std::strcmp(argv[1], "cube");
+    // array-uint / array-sint: the cube data at binding 3 as an integer 2D array, sampled with an implicit LOD.
+    const bool array_uint = argc >= 2 && !std::strcmp(argv[1], "array-uint");
+    const bool array_sint = argc >= 2 && !std::strcmp(argv[1], "array-sint");
+    const bool int_array = array_uint || array_sint;
     // dref_c / dref_c_b: image_sample_c / image_sample_c_b (implicit LOD, bias), same texture and expected results.
     const char* dref_ps = nullptr;
     if (argc >= 2) {
@@ -117,7 +125,7 @@ int main(int argc, char** argv) {
         out_path = argv[3];
         ptr_sgpr = std::atoi(argv[4]);
         for (int i = 0; i < 4; ++i) ssharp[i] = (uint32_t)strtoul(argv[5 + i], 0, 16);
-    } else if (argc <= 2 || ((cube || dref || fetch) && argc == 3)) {
+    } else if (argc <= 2 || ((cube || dref || fetch || int_array) && argc == 3)) {
         // Autonomous mode using synthetic hand-written shaders (no game files required)
         autonomous = true;
         auto find_spv = [](const char* name) -> std::string {
@@ -136,21 +144,23 @@ int main(int argc, char** argv) {
             return std::string("runtime/build/shaders/spirv/") + name;
         };
         vs_path = find_spv("vs_ids.spv");
-        fs_path = find_spv(fetch ? "ps_table_fetch.spv" : cube ? "ps_cube_sample.spv" : dref ? dref_ps : "ps_texture_sample.spv");
-        const int out_arg = cube || dref || fetch ? 2 : 1;
+        fs_path = find_spv(fetch ? "ps_table_fetch.spv" : cube ? "ps_cube_sample.spv" : dref ? dref_ps :
+                           array_uint ? "ps_sample_array_uint.spv" : array_sint ? "ps_sample_array_sint.spv" :
+                           "ps_texture_sample.spv");
+        const int out_arg = cube || dref || fetch || int_array ? 2 : 1;
         out_path = argc > out_arg ? argv[out_arg] : "runtime/build/vk_texture_test_out.raw";
         ptr_sgpr = 0;
         if (dref)
             ssharp[0] |= 3u << 12;              // the shader's S#: DEPTH_COMPARE_FUNC = LESSEQUAL
     } else {
-        std::fprintf(stderr, "usage: vk_texture_test [cube|dref|dref_a16|dref_c|dref_c_b|fetch-uint|fetch-sint|fetch-miss] [out] | vs fs out ptr_sgpr s0 s1 s2 s3 [--two-mip|--two-mip-sint|--two-mip-uint]\n");
+        std::fprintf(stderr, "usage: vk_texture_test [cube|array-uint|array-sint|dref|dref_a16|dref_c|dref_c_b|fetch-uint|fetch-sint|fetch-miss] [out] | vs fs out ptr_sgpr s0 s1 s2 s3 [--two-mip|--two-mip-sint|--two-mip-uint]\n");
         return 2;
     }
     // Word 1 also selects the numeric type when the shader fetches through this key. Word 3 keeps BASE_LEVEL [15:12]
     // at 0, as the views here start at level 0: image_get_resinfo minifies a 2D array's layers from BASE_LEVEL.
     const VkFormat sampled_format = dref ? VK_FORMAT_D32_SFLOAT :
-        (uint_mips || fetch_uint) ? VK_FORMAT_R8G8B8A8_UINT :
-        (signed_mips || fetch) ? VK_FORMAT_R8G8B8A8_SINT : VK_FORMAT_R8G8B8A8_UNORM;
+        (uint_mips || fetch_uint || array_uint) ? VK_FORMAT_R8G8B8A8_UINT :
+        (signed_mips || fetch || array_sint) ? VK_FORMAT_R8G8B8A8_SINT : VK_FORMAT_R8G8B8A8_UNORM;
     uint32_t tsharp[8] = {0x11111111, leonida::gfx10::format_from_vulkan(sampled_format) << 20, 0x33333333, 0x44440444,
                           0x55555555, 0x66666666, 0x77777777, 0x88888888};
     const uint32_t tsharp_va = 256;
@@ -385,8 +395,9 @@ int main(int argc, char** argv) {
             for (uint32_t l = 0; l < CUBE_LAYERS; l++)
                 cubes[(l * TW + y) * TW + x] = (x * 32u) | ((y * 32u) << 8) | ((l * 20u) << 16) | (255u << 24);
         }
+    // The integer-array modes give binding 3 index 1 the T#'s integer format; the T# key also maps binding 0 index 1.
     const VkFormat tfmt[4] = {VK_FORMAT_R8G8B8A8_UNORM, sampled_format,
-                              VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM};
+                              VK_FORMAT_R8G8B8A8_UNORM, int_array ? sampled_format : VK_FORMAT_R8G8B8A8_UNORM};
     VkImage timg[4]; VkImageView tview[4];
     CHECK(make_tex(1, 1, 1, 1, VK_IMAGE_VIEW_TYPE_2D, tfmt[0], &timg[0], &tview[0]));
     CHECK(make_tex(texture_side, texture_side, levels, 1, VK_IMAGE_VIEW_TYPE_2D, tfmt[1], &timg[1], &tview[1]));
@@ -615,6 +626,31 @@ int main(int argc, char** argv) {
         std::printf("vk_texture_test cube: PASSED (%d pixels, each the texel a cube sample of its direction reads)\n",
                     checked);
     }
+    if (autonomous && int_array) {
+        // Expected: pixel (px, py) reads texel (px / 8, py / 8) of layer 3 (u = (px + 0.5) / 64 is never on a texel
+        // edge), the bytes (32x, 32y, 60, 255), unsigned for UINT and as signed 8-bit values for SINT.
+        const float* pixels = static_cast<const float*>(rbp);
+        const uint32_t layer = 3;
+        int wrong = 0;
+        for (uint32_t py = 0; py < H; py++)
+            for (uint32_t px = 0; px < W; px++) {
+                const uint32_t bytes[4] = {px / (W / TW) * 32u, py / (H / TW) * 32u, layer * 20u, 255u};
+                const float* p = pixels + (py * W + px) * 4;
+                bool ok = true;
+                for (int c = 0; c < 4; c++) {
+                    const float want = array_sint ? float(int8_t(uint8_t(bytes[c]))) : float(bytes[c]);
+                    ok &= p[c] == want;
+                }
+                if (!ok && wrong < 4)
+                    std::fprintf(stderr, "pixel (%u, %u): (%g, %g, %g, %g)\n", px, py, p[0], p[1], p[2], p[3]);
+                wrong += !ok;
+            }
+        if (wrong) {
+            std::fprintf(stderr, "vk_texture_test %s: %d of %u pixels FAILED\n", argv[1], wrong, W * H);
+            return 1;
+        }
+        std::printf("vk_texture_test %s: PASSED (%u exact pixels, the integer texels of layer 3)\n", argv[1], W * H);
+    }
     if (autonomous && dref) {
         // Expected: pixel column px reads texel x = floor(8u) at u = (px + 0.5) / 64 (never on a texel edge), whose
         // depth (x + 0.5) / 8 passes the reference 0.5 under LESS_OR_EQUAL from x = 4 on. Both results, the f32 one
@@ -656,7 +692,7 @@ int main(int argc, char** argv) {
         }
         std::printf("%s: %u exact pixels\n", argv[1], W * H);
     }
-    if (autonomous && !cube && !dref && !fetch) {
+    if (autonomous && !cube && !dref && !fetch && !int_array) {
         const float* pixels = static_cast<const float*>(rbp);
         // Sample center pixel (32, 32)
         int idx = (32 * W + 32) * 4;

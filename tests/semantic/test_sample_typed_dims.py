@@ -1,11 +1,11 @@
-"""image_sample_l / image_sample_lz read a UINT/SINT image through its integer view in every dimension.
+"""image_sample, image_sample_l and image_sample_lz read a UINT/SINT image through its integer view in every dimension.
 
 Standard library only (spirv-as and spirv-val are used when they are on PATH); no GPU, no game files.
 
 The hardware picks the sampled view from T# word 1 FORMAT in every dimension, and image_load has read the uint/sint
 alias of the dimension's sampled binding in all of them (SHADER-151). Sampling took that path for 2D only, so a UINT
 2D-array, 3D, cube or 1D texture was read through the float view and the VGPRs held a converted float instead of the
-integer texel. Here: the alias each dimension loads, the sampled-image type it pairs with the sampler, that the float
+integer texel. image_sample (implicit LOD) stayed on the float view outside 2D pixel shaders until SHADER-1404. Here: the alias each dimension loads, the sampled-image type it pairs with the sampler, that the float
 view is still sampled for a float format, and that the modules validate. The GPU pixel fixtures are
 runtime/test/shaders/ps_sample_implicit_uint.asm and ps_sample_implicit_sint.asm (2D); a non-2D integer texture is the
 remaining pixel check.
@@ -37,6 +37,16 @@ def translate(name, line):
     return support.translate_lines(name, PRO + [line, "exp mrt0 v9, v9, v9, v9 done vm", "s_endpgm"])
 
 
+def translate_vs(name, line):
+    return support.translate_lines(name, PRO + [line, "exp pos0 v9, v9, v9, v9 done", "s_endpgm"])
+
+
+# dim -> (gradient type, whether the gradient source is the first two of three coordinates)
+GRADS = {"1D": ("%float", False), "2D": ("%v2float", False), "2D_ARRAY": ("%v2float", True),
+         "3D": ("%v3float", False), "CUBE": ("%v2float", True)}
+TYPED_OPS = ("image_sample", "image_sample_l", "image_sample_lz")
+
+
 def sample(op, dim):
     addr, vdata, dmask, _, _ = DIMS[dim]
     return f"{op} {vdata}, {addr}, {DESC} dmask:{dmask} dim:SQ_RSRC_IMG_{dim}"
@@ -44,7 +54,7 @@ def sample(op, dim):
 
 class SampleTypedDims(unittest.TestCase):
     def test_both_integer_classes_alias_the_dimension_sampled_binding(self):
-        for op in ("image_sample_l", "image_sample_lz"):
+        for op in TYPED_OPS:
             for dim, (_, _, _, di, binding) in DIMS.items():
                 with self.subTest(op=op, dim=dim):
                     spv = translate("ps_sampletyped", sample(op, dim))
@@ -56,6 +66,26 @@ class SampleTypedDims(unittest.TestCase):
                     self.assertRegex(spv, r"= OpImageSampleExplicitLod %v4int_st %")
                     # A float format still samples the float view the runtime binds at the same index.
                     self.assertRegex(spv, r"= OpImageSampleExplicitLod %v4float %")
+
+    def test_implicit_sample_in_a_pixel_shader_uses_quad_gradients_of_the_derivative_coordinates(self):
+        for dim, (gty, shuffled) in GRADS.items():
+            with self.subTest(dim=dim):
+                spv = translate("ps_sampleimplicittyped", sample("image_sample", dim))
+                self.assertNotIn("OpImageSampleImplicitLod", spv)
+                self.assertRegex(spv, rf"= OpDPdx {gty} %")
+                self.assertRegex(spv, rf"= OpDPdy {gty} %")
+                self.assertEqual(bool(re.search(r"= OpVectorShuffle %v2float (%\w+) \1 0 1", spv)), shuffled)
+                self.assertRegex(spv, r"= OpImageSampleExplicitLod %v4uint_st %\w+ %\w+ Grad %\w+ %\w+")
+                self.assertRegex(spv, r"= OpImageSampleExplicitLod %v4float %\w+ %\w+ Grad %\w+ %\w+")
+
+    def test_implicit_sample_outside_a_pixel_shader_reads_lod_zero_through_the_integer_view(self):
+        for dim, (_, _, _, di, _) in DIMS.items():
+            with self.subTest(dim=dim):
+                spv = translate_vs("vs_sampleimplicittyped", sample("image_sample", dim))
+                self.assertNotIn("OpDPdx", spv)
+                self.assertRegex(spv, rf"OpAccessChain %_ptr_UC_itx1_{di} %itx1_{di} ")
+                self.assertRegex(spv, r"= OpImageSampleExplicitLod %v4uint_st %\w+ %\w+ Lod %f0")
+                self.assertRegex(spv, r"= OpImageSampleExplicitLod %v4int_st %\w+ %\w+ Lod %f0")
 
     def test_cube_samples_its_2d_array_view_with_three_coordinates(self):
         spv = translate("ps_samplecubetyped", sample("image_sample_lz", "CUBE"))
@@ -72,16 +102,19 @@ class SampleTypedDims(unittest.TestCase):
     @unittest.skipUnless(shutil.which("spirv-as") and shutil.which("spirv-val"),
                          "needs spirv-as and spirv-val on PATH")
     def test_modules_validate(self):
-        for op in ("image_sample_l", "image_sample_lz"):
+        for op in TYPED_OPS:
             for dim in DIMS:
-                with self.subTest(op=op, dim=dim):
-                    spv = translate("ps_sampletypedval", sample(op, dim))
-                    with tempfile.TemporaryDirectory() as tmp:
-                        a, b = os.path.join(tmp, "m.spvasm"), os.path.join(tmp, "m.spv")
-                        with open(a, "w", encoding="utf-8", newline="\n") as f:
-                            f.write(spv)
-                        subprocess.run(["spirv-as", "--target-env", "vulkan1.2", a, "-o", b], check=True)
-                        subprocess.run(["spirv-val", "--target-env", "vulkan1.2", b], check=True)
+                for stage, tr in (("ps", translate), ("vs", translate_vs)):
+                    with self.subTest(op=op, dim=dim, stage=stage):
+                        self._validate(tr(f"{stage}_sampletypedval", sample(op, dim)))
+
+    def _validate(self, spv):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = os.path.join(tmp, "m.spvasm"), os.path.join(tmp, "m.spv")
+            with open(a, "w", encoding="utf-8", newline="\n") as f:
+                f.write(spv)
+            subprocess.run(["spirv-as", "--target-env", "vulkan1.2", a, "-o", b], check=True)
+            subprocess.run(["spirv-val", "--target-env", "vulkan1.2", b], check=True)
 
 
 if __name__ == "__main__":
