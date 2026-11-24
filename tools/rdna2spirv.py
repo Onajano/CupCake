@@ -3475,6 +3475,7 @@ class Gen:
         if any(m in mods for m in ("lds", "tfe", "d16")):
             raise Unsupported(op + " form")
         d16 = "_d16_" in op
+        d16_hi = "_d16_hi_" in op           # buffer_load_format_d16_hi_x: the one result goes to the high half
         ncomp = len(op.rsplit("_", 1)[1])
         vd = a[0]
         addr, d3, in_b, step = self.buffer_address(a, mods, elem="fmt", fixed_fmt=fixed_fmt)
@@ -3647,10 +3648,17 @@ class Gen:
                 il = int_half(lo)
                 r = self.tmp()
                 if i + 1 == len(outs):
-                    # For d16_x and d16_xyz the unaddressed high half keeps its previous bits.
+                    # For d16_x and d16_xyz the unaddressed high half keeps its previous bits; d16_hi_x writes
+                    # the high half and keeps the low one.
                     fl = self.d16_norm_f16(lo, is_norm, is_f32)
                     self.emit(f"{r} = OpSelect %uint {is_int_fmt} {il} {fl}")
-                    self.write_lo16(dest, r)
+                    if d16_hi:
+                        ins = self.tmp()
+                        self.emit(f"{ins} = OpBitFieldInsert %uint {self.load_reg('vgpr', dest['r'])} {r} "
+                                  f"{self.cu(16)} {self.cu(16)}")
+                        self.dst(dest, ins)
+                    else:
+                        self.write_lo16(dest, r)
                     continue
                 hi = outs[i + 1]
                 ph = self.tmp()
@@ -4393,7 +4401,8 @@ class Gen:
                 comps, icomps = [], []
                 for i in range(n):
                     r = regs[i // 2]
-                    iv = self.u16_half(r, i % 2)
+                    # buffer_store_format_d16_hi_x stores the high half of the one register
+                    iv = self.u16_half(r, 1 if "_d16_hi_" in op else i % 2)
                     v2, f = self.tmp(), self.tmp()
                     self.emit(f"{v2} = OpExtInst %v2float %glsl UnpackHalf2x16 {iv}")
                     self.emit(f"{f} = OpCompositeExtract %float {v2} 0")
@@ -4473,7 +4482,7 @@ class Gen:
             unorm_view = [red, unorm_rgba[1], blue, unorm_rgba[3]]
             signed_ic = ic
             if d16:
-                signed_ic = [self.int_bits(self.i16_half(regs[i // 2], i % 2)) for i in range(n)]
+                signed_ic = [self.int_bits(self.i16_half(regs[i // 2], 1 if "_d16_hi_" in op else i % 2)) for i in range(n)]
                 signed_ic = signed_ic + [self.cu(0)] * (4 - len(signed_ic))
             # MUBUF 2-component stores infer COMP_SWAP from V# DST_SEL_X/Y/Z (measured natively on gfx1036 across
             # all 1,296 valid DST_SEL tuples, wave32 and wave64): XY01 -> (x, y), YX01 -> (y, x), XYZW -> (x, w),
@@ -8676,7 +8685,8 @@ class Gen:
         elif op.startswith("buffer_store_dword") or op in ("buffer_store_format_x", "buffer_store_format_xy",
                                                             "buffer_store_format_xyz", "buffer_store_format_xyzw",
                                                             "buffer_store_format_d16_x", "buffer_store_format_d16_xy",
-                                                            "buffer_store_format_d16_xyz", "buffer_store_format_d16_xyzw"):
+                                                            "buffer_store_format_d16_xyz", "buffer_store_format_d16_xyzw",
+                                                            "buffer_store_format_d16_hi_x"):
             self.buffer_store(op, a, mods)
         elif op in ("v_permlanex16_b32", "v_permlane16_b32"):
             # Lane l reads lane sel[l & 15] of (x16: the other 16-lane half of its row; plain: the same half).
@@ -8764,7 +8774,7 @@ class Gen:
             self.buffer_load_sub(op, a, mods)
         elif op in ("buffer_load_format_x", "buffer_load_format_xy", "buffer_load_format_xyz",
                     "buffer_load_format_xyzw", "buffer_load_format_d16_x", "buffer_load_format_d16_xy",
-                    "buffer_load_format_d16_xyz", "buffer_load_format_d16_xyzw"):
+                    "buffer_load_format_d16_xyz", "buffer_load_format_d16_xyzw", "buffer_load_format_d16_hi_x"):
             self.buffer_load_format(op, a, mods)
         elif op in ("tbuffer_load_format_x", "tbuffer_load_format_xy", "tbuffer_load_format_xyz",
                     "tbuffer_load_format_xyzw", "tbuffer_load_format_d16_x", "tbuffer_load_format_d16_xy",
@@ -16665,7 +16675,8 @@ def read_before_write_vgprs(insns):
         if (base_op(op) in ("v_swap_b32", "v_fmac_f32", "v_mac_f32", "v_mac_legacy_f32", "v_fmac_f16", "v_dot4c_i32_i8", "v_pk_fmac_f16",
                             "v_dot2c_f32_f16", "v_dot2c_i32_i16", "v_dot2c_u32_u16", "v_dot4c_u32_u8",
                             "v_dot8c_i32_i4", "v_dot8c_u32_u4") or
-                (op.startswith(("global_load_", "buffer_load_")) and "_d16" in op and "format" not in op)) and \
+                (op.startswith(("global_load_", "buffer_load_")) and "_d16" in op and "format" not in op) or op == "buffer_load_format_d16_hi_x") and \
+                \
                 a[0]["k"] == "vgpr":   # d16 keeps a half
             regs.append(a[0]["r"])
         for r in regs:
