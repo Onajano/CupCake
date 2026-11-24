@@ -159,6 +159,10 @@ bool command_object_tables_guarded();
 // {7d0e6b51-34a2-4f0c-9a61-0c5b2e8f4a10}: the Vulkan layer's CommandAllocator answers it with its implementation.
 inline constexpr GUID kLeonidaCommandAllocatorTag{
     0x7d0e6b51, 0x34a2, 0x4f0c, {0x9a, 0x61, 0x0c, 0x5b, 0x2e, 0x8f, 0x4a, 0x10}};
+// The console's own command-list interface: CreateCommandListX (device slot 73) asks for it by name in the retail
+// executable. No PC list answers it, so a command-list proxy answers it itself and maps its slots to the PC ones.
+inline constexpr GUID kConsoleListIID{
+    0xc3827890, 0x4024, 0x474c, {0x98, 0xcf, 0x64, 0x5b, 0x51, 0xdc, 0x48, 0x74}};
 bool is_allocator_proxy(const void* allocator);
 // The wrapped allocator (no reference added), or null when `allocator` is not an allocator proxy.
 ID3D12CommandAllocator* allocator_proxy_real_allocator(const void* allocator);

@@ -23,6 +23,7 @@
 // for a trace that disagrees. The frame-event calls answer from a per-device token counter: there is no vblank source
 // behind the device before a presenter exists, so WaitFrameEventX returns at once with a fresh non-zero token.
 #include "d3d12_xs_device.h"
+#include "d3d12_com.h"  // local: create_console_descriptor_heap
 #include "d3d12_trace.h"
 #include "../src/shader_library.h"  // leonida::fspx_payload_from_parts for slot 67
 
@@ -980,6 +981,7 @@ inline void note_list_slot(unsigned slot, std::uint64_t a1 = 0, std::uint64_t a2
 }
 
 inline bool is_list_iid(const IID& iid) {
+    if (IsEqualIID(iid, kConsoleListIID)) return true;
     return IsEqualIID(iid, __uuidof(IUnknown)) || IsEqualIID(iid, __uuidof(ID3D12Object)) ||
            IsEqualIID(iid, __uuidof(ID3D12DeviceChild)) || IsEqualIID(iid, __uuidof(ID3D12CommandList)) ||
            IsEqualIID(iid, __uuidof(ID3D12GraphicsCommandList)) ||
@@ -1018,7 +1020,8 @@ inline HRESULT list_query_interface(ListProxy* self, const IID* riid, void** out
         if (supports_iid(self->real, *riid)) log_refused_iid("list", *riid);
         return E_NOINTERFACE;
     }
-    if (!supports_iid(self->real, *riid)) return E_NOINTERFACE;
+    // No PC list answers the console interface; the proxy answers it itself.
+    if (!IsEqualIID(*riid, kConsoleListIID) && !supports_iid(self->real, *riid)) return E_NOINTERFACE;
     *out = self;
     list_add_ref(self);
     return S_OK;
@@ -1364,9 +1367,27 @@ HRESULT proxy_create_command_queue(DeviceProxy* self, const D3D12_COMMAND_QUEUE_
     // The caller's null output goes to the real device on purpose: its answer (S_FALSE, E_UNEXPECTED, ...) is the
     // one to give, although the SDK annotates the parameter as required.
 #pragma warning(suppress : 6387)
+    // The console desc starts with a PC D3D12_COMMAND_QUEUE_DESC and adds Xbox words after it
+    // (docs/retail_boot_chain.md 3.2). Only the PC prefix is read, and Flags is limited to the one PC flag: the
+    // console sets bits the PC device refuses, which made CreateCommandQueue fail and the title assert.
+    D3D12_COMMAND_QUEUE_DESC pc_desc{};
+    if (desc) {
+        pc_desc = *desc;
+        pc_desc.Flags = static_cast<D3D12_COMMAND_QUEUE_FLAGS>(static_cast<std::uint32_t>(pc_desc.Flags) &
+                                                              D3D12_COMMAND_QUEUE_FLAG_DISABLE_GPU_TIMEOUT);
+        desc = &pc_desc;
+    }
     if (!out) return self->real->CreateCommandQueue(desc, *riid, nullptr);
     void* created = nullptr;
     const HRESULT hr = self->real->CreateCommandQueue(desc, __uuidof(ID3D12CommandQueue), &created);
+    {
+        static std::atomic<bool> logged{false};
+        if (first_call(logged) || FAILED(hr))
+            std::fprintf(stderr,
+                         "[rt] queue: type=%d priority=%d flags=0x%x node=%u -> hr=0x%08lx\n",
+                         static_cast<int>(pc_desc.Type), pc_desc.Priority, static_cast<unsigned>(pc_desc.Flags),
+                         pc_desc.NodeMask, static_cast<unsigned long>(hr));
+    }
     if (FAILED(hr)) return hr;
     return wrap_child<ChildKind::queue>(static_cast<IUnknown*>(created), self, riid, out);
 }
@@ -1438,8 +1459,13 @@ HRESULT proxy_create_command_list_x(DeviceProxy* self, std::uint64_t desc_word, 
     if (!allocator) allocator = reinterpret_cast<ID3D12CommandAllocator*>(allocator_word);
     auto* initial_state = reinterpret_cast<ID3D12PipelineState*>(initial_state_word);
     void* created = nullptr;
-    const HRESULT hr = self->real->CreateCommandList(0, type, allocator, initial_state,
-                                                     *riid, &created);
+    // The layer (and any PC device behind the proxy) only knows the PC list interfaces. Hand a requested PC
+    // interface on as asked; for anything else (the title's own console list interface) create the base PC list and
+    // let wrap_list answer the requested IID with the proxy. Passing the console IID down made CreateCommandList
+    // answer E_NOINTERFACE, so every list came back null and the title read through it.
+    const IID pc_base = __uuidof(ID3D12GraphicsCommandList);
+    const IID* create_iid = supports_iid(self->real, *riid) ? riid : &pc_base;
+    const HRESULT hr = self->real->CreateCommandList(0, type, allocator, initial_state, *create_iid, &created);
     if (FAILED(hr)) return hr;
     return wrap_list(static_cast<IUnknown*>(created), self, riid, out);
 }

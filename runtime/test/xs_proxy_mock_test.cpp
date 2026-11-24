@@ -867,6 +867,20 @@ int check_xbox_slots() {
     EXPECT(mock->args[12][2] == word(real_allocator) && mock->args[12][3] == 0);
     EXPECT(mock->args[12][4] == word(&list_iid));
 
+    // The same slot asked for the console's own list interface, {c3827890-4024-474c-98cf-645b51dc4874}, which no PC
+    // list answers. The proxy answers it itself; the layer receives the PC base interface.
+    const IID console_list_iid = xs::kConsoleListIID;
+    void* console_list = nullptr;
+    EXPECT(hr_of(raw(device, 73, word(&desc), word(allocator), 0, word(&console_list_iid),
+                     word(&console_list))) == S_OK);
+    EXPECT(xs::is_command_list_proxy(console_list));
+    EXPECT(std::memcmp(reinterpret_cast<const void*>(mock->args[12][4]), &__uuidof(ID3D12GraphicsCommandList),
+                        sizeof(IID)) == 0);
+    void* console_query = nullptr;
+    EXPECT(hr_of(raw(console_list, 0, word(&console_list_iid), word(&console_query))) == S_OK &&
+           console_query == console_list);
+    EXPECT(release(console_list) == 0);
+
     // Release the list before the refusal calls below: the COM convention (and the handler) nulls the caller's
     // output on failure, so an invalid call would clear this pointer.
     EXPECT(release(list) == 0);
