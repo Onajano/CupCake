@@ -362,9 +362,15 @@ main { flex: 1; position: relative; overflow: hidden; display: flex; }
 }
 
 </style>
-<script src="/vendor/three.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js'"></script>
-<script src="/vendor/OrbitControls.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js'"></script>
-<script src="/vendor/GLTFLoader.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js'"></script>
+<!-- three.js r128: a copy in /vendor/ if there is one, else the CDN, pinned to an exact version. The same integrity
+     hash covers both, so a copy in /vendor/ must be the same r128 file (cdnjs and jsdelivr serve identical bytes).
+     The fallback is written in with document.write so it still runs before the scripts below: setting src on a
+     script that already failed does not fetch again.
+     Bumping the version means updating every URL and hash (openssl dgst -sha384 -binary FILE | openssl base64 -A);
+     tests/test_viewer_cdn_integrity.py checks the pairing. -->
+<script src="/vendor/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous" onerror="document.write('<script src=\x22https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js\x22 integrity=\x22'+this.integrity+'\x22 crossorigin=\x22anonymous\x22><\/script>')"></script>
+<script src="/vendor/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous" onerror="document.write('<script src=\x22https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js\x22 integrity=\x22'+this.integrity+'\x22 crossorigin=\x22anonymous\x22><\/script>')"></script>
+<script src="/vendor/GLTFLoader.js" integrity="sha384-fljlqkjWlmSFjkESkQvm77heIZpoWmXEOzlCA7kOpGUH+95Zk0yGfQieWM2q136E" crossorigin="anonymous" onerror="document.write('<script src=\x22https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js\x22 integrity=\x22'+this.integrity+'\x22 crossorigin=\x22anonymous\x22><\/script>')"></script>
 </head>
 <body>
 

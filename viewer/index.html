@@ -36,12 +36,25 @@
 </div>
 <div id="start">Click to fly</div>
 
+<!-- three.js comes from a CDN pinned to an exact version, and every file of its module graph carries a
+     Subresource Integrity hash: the import map's "integrity" table (Chromium 127+, Firefox 138+, Safari 18+) and,
+     for older browsers, the modulepreload links, whose fetch the module imports reuse. A changed file fails to
+     load instead of running. Bumping the version means updating every URL and hash here
+     (openssl dgst -sha384 -binary FILE | openssl base64 -A); tests/test_viewer_cdn_integrity.py checks the pairing. -->
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+},
+  "integrity": {
+  "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js": "sha384-61S/Nu32S3E5+n+KpCOTb2eRYps6fVKm+9Gz1QBvSePFthb46f063Aa/qe/lykFZ",
+  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js": "sha384-oxY9vSeh7Mrt5WmhN8xfWoDRnmoW9krEiRBY7vJKaK90jMUidM0fhbUwcblpBgTu",
+  "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js": "sha384-jHGXS4+FuVOBnZkNme2ury3Ccg5DWDLYK22xX/WGdZCZsjRM4J+3n6Qc4CXx1Hjf"
 } }
 </script>
+<link rel="modulepreload" crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" integrity="sha384-61S/Nu32S3E5+n+KpCOTb2eRYps6fVKm+9Gz1QBvSePFthb46f063Aa/qe/lykFZ">
+<link rel="modulepreload" crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js" integrity="sha384-oxY9vSeh7Mrt5WmhN8xfWoDRnmoW9krEiRBY7vJKaK90jMUidM0fhbUwcblpBgTu">
+<link rel="modulepreload" crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/utils/BufferGeometryUtils.js" integrity="sha384-jHGXS4+FuVOBnZkNme2ury3Ccg5DWDLYK22xX/WGdZCZsjRM4J+3n6Qc4CXx1Hjf">
 <script type="module">
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
