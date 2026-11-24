@@ -39,13 +39,15 @@ class BuildDestinationTest(unittest.TestCase):
             os.symlink(target, path, target_is_directory=True)
             self.addCleanup(os.unlink, path)
 
-    def run_build(self, game, out, work, rejected):
+    def run_build(self, game, out, work, rejected, manifest=None):
         argv = ["make_game.py", "--game", game, "--out", out, "--work", work,
                 "--stages", "runtime", "--no-tui"]
         with ExitStack() as stack:
             stack.enter_context(patch.object(sys, "argv", argv))
             stack.enter_context(patch("make_game.below_normal"))
-            stack.enter_context(patch("make_game.check", return_value={}))
+            # A drive-root game folder is judged against the version manifest's top-level entries, so a case that
+            # needs one passes it here; the other cases never read it.
+            stack.enter_context(patch("make_game.check", return_value=manifest if manifest is not None else {}))
             stack.enter_context(patch("make_game.log"))
             preflight = stack.enter_context(patch("make_game.preflight"))
             build_runtime = stack.enter_context(patch("make_game.runtime"))
@@ -94,13 +96,15 @@ class BuildDestinationTest(unittest.TestCase):
         drive = os.path.splitdrive(self.root)[0] + "\\"
         content_dir = os.path.join(drive, "Content")
         independent_dir = os.path.join(drive, "Leonida_Build")
-        with patch("os.listdir", return_value=["Content"]):
-            # Allowed: destination is an independent folder on the drive root
-            self.run_build(drive, independent_dir, os.path.join(independent_dir, "work"), rejected=False)
-            # Rejected: destination is inside the game dump's own top-level entry
-            self.run_build(drive, os.path.join(content_dir, "out"), os.path.join(self.root, "work"), rejected=True)
-            # Rejected: destination is the drive root itself
-            self.run_build(drive, drive, os.path.join(self.root, "work"), rejected=True)
+        manifest = {"expected_exe": "Content/Default.exe", "files": []}
+        # Allowed: destination is an independent folder on the drive root
+        self.run_build(drive, independent_dir, os.path.join(independent_dir, "work"), rejected=False,
+                       manifest=manifest)
+        # Rejected: destination is inside the game dump's own top-level entry
+        self.run_build(drive, os.path.join(content_dir, "out"), os.path.join(self.root, "work"), rejected=True,
+                       manifest=manifest)
+        # Rejected: destination is the drive root itself
+        self.run_build(drive, drive, os.path.join(self.root, "work"), rejected=True, manifest=manifest)
 
     def test_drive_root_checks_entries_on_each_volume(self):
         if os.name != "nt":
@@ -115,19 +119,18 @@ class BuildDestinationTest(unittest.TestCase):
                 return mounted_content
             return os.path.normpath(path)
 
-        # A junction target on a different volume must not end the search before the matching entry.
-        for entries, protected in (
-            (["MountedContent", "Content"], os.path.join(root, "Content")),
-            (["Content", "MountedContent"], mounted_content),
-        ):
-            with patch("os.listdir", return_value=entries), patch("os.path.realpath", side_effect=realpath):
+        # The dump's top-level entries come from the version manifest; a junction to another volume must not hide
+        # the entry it stands for.
+        manifest = {"expected_exe": "Content/Default.exe", "files": ["MountedContent/data.bin"]}
+        for protected in (os.path.join(root, "Content"), mounted_content):
+            with patch("os.path.realpath", side_effect=realpath):
                 for option in ("out", "work"):
                     with self.subTest(protected=protected, option=option):
                         destinations = {name: os.path.join(self.root, name) for name in ("out", "work")}
                         destinations[option] = os.path.join(protected, "build")
-                        self.run_build(root, **destinations, rejected=True)
+                        self.run_build(root, **destinations, rejected=True, manifest=manifest)
                 self.run_build(root, os.path.join(other_root, "Build"),
-                               os.path.join(other_root, "Scratch"), rejected=False)
+                               os.path.join(other_root, "Scratch"), rejected=False, manifest=manifest)
 
 
 if __name__ == "__main__":
