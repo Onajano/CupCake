@@ -455,7 +455,10 @@ def main(argv=None):
 
     try:
         names = read_mount_lists(a.mount)
-    except (OSError, ValueError) as error:
+    except OSError as error:
+        print(f"bink_names: error: {error.filename or a.mount}: {error.strerror or error}", file=sys.stderr)
+        return 1
+    except ValueError as error:
         print(f"bink_names: error: {error}", file=sys.stderr)
         return 1
     try:
