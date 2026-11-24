@@ -2467,6 +2467,12 @@ The trace will enumerate them.
   or 0) are copied in order. Not compared: null data, which the host faults on (the layer answers `E_INVALIDARG`);
   which bytes win when a read's rows overlap, which is the driver's copy order; and a default-heap texture, which
   the host refuses and the layer copies on purpose.
+  - A driver can report `VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT_EXT` for a format, create the image with
+    host-transfer usage, and then give it no memory type (`memoryTypeBits = 0`). This was measured on a GTX 1050 Ti
+    with NVIDIA 582.78, and the validation layer of Vulkan SDK 1.4.363 reports nothing. Such a texture is made again
+    without host-transfer usage before it is bound, and takes the staging path. `d3d12_vulkan_device_test` and
+    `d3d12_subresource_copy_test` force this branch on any GPU with `VulkanDeviceInfo::force_host_transfer_retry`
+    (their third CPU-copy path; the second compares it with the host runtime).
 - 96-bit textures (`R32G32B32_FLOAT`/`_UINT`/`_SINT`/`_TYPELESS`, D3D-62) are `R32G32B32A32` images
   (`ResourceBinding::rgb96`), on every GPU. Most GPUs have no optimal-tiling RGB32 image (an RX 9070 XT reports
   no optimal features for `R32G32B32_SFLOAT`), and one that has would not avoid the repack: D3D12 places
