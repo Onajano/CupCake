@@ -60,3 +60,13 @@ methods are still open.
 - Say what you tested and on which GPU in the pull request.
 - Run the translator tests with `python -I scripts/run_semantic_tests.py tests/semantic` (see `tests/semantic/README.md`). A new
   translator rule should come with a small hand-written `.asm` fixture and its expected output words.
+
+## Pull requests
+
+- One topic per pull request, based on current `main`. Follow-up work goes in a new pull request, not into an open
+  one.
+- Fill in the [template](.github/pull_request_template.md): the claim, `Depends on:`, `Fixes: #N` for an issue it
+  closes, what you tested, `GPUs tested:` (vendor, model, driver and OS) and whether it was AI-assisted.
+- A pull request that conflicts with `main` is labeled `needs rebase` (`tools/pr_conflict_label.py`, run on every
+  push to `main` and to the pull request, and hourly). Rebase it on `main` yourself; the label goes once it merges
+  cleanly. Reviews start with the pull requests that do.
