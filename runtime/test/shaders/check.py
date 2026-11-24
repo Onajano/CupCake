@@ -108,7 +108,7 @@ WAVE32_DUMPS = ("cs_store", "cs_signed_zero_nan", "cs_smem_soffset_imm", "cs_wqm
                 "cs_w32_lds_subdword", "cs_w32_lds_wide",
                 "cs_w32_partial_scmp", "cs_w32_partial_permute", "cs_exec_const", "cs_w32_mask_imm", "cs_w32_int_ext",
                 "cs_w32_salu64", "cs_w32_misc_ext", "cs_w32_new_ops", "cs_w32_sincos", "cs_lds_b64_cmpst", "cs_lds_xchg64_ext", "cs_lds_atomics_ext", "cs_w32_andn2_exec",
-                "cs_mask_vgpr_exec", "cs_w32_buffer_sub16", "cs_w32_buffer_store_sub", "cs_w32_fcmpswap", "cs_w32_permlane_fi",
+                "cs_mask_vgpr_exec", "cs_w32_lds_add_f32", "cs_w32_buffer_sub16", "cs_w32_buffer_store_sub", "cs_w32_fcmpswap", "cs_w32_permlane_fi",
                 "cs_w32_exec_computed")
 # Wave32 lane-mask dumps: their EXEC/VCC masks and lane selects cover 32 lanes, so a device whose widest subgroup is
 # narrower (Mesa llvmpipe: 8) can't produce their words. They are skipped there, as ps_bitmask_perm is. They run with
@@ -140,6 +140,8 @@ CS_DUMPS = [*CS_DPP, ("cs_store", CS_STORE), ("cs_smem_soffset_imm", CS_SMEM),
             # 64-bit scalar data ops and v_mad_u64_u32 (derivations in cs_w32_salu64.asm)
             # more ops with CPU-only checks until now (derivations in cs_w32_misc_ext.asm)
             # ops merged on 2026-11-22 with CPU-only checks (derivations in cs_w32_new_ops.asm)
+            # ds_add_f32 / ds_add_rtn_f32: binary32 add, ties to even (cs_w32_lds_add_f32.asm)
+            ("cs_w32_lds_add_f32", [0x3FC00000, 0x40700000, 0x4B800000, 0x4B800002, 0, 0x7F800000, 0x3E800000, 0x40200000]),
             # plain 8/16-bit MUBUF stores, one crossing a dword (cs_w32_buffer_store_sub.asm)
             ("cs_w32_buffer_store_sub", [0x1122AB44, 0xCDEF7788, 0x34AABBCC, 0xDDDDDD12, 0x0102035A, 0x05061234, 0xAB, 0xFFFFCDEF]),
             # 8/16-bit MUBUF d16 loads and stores (cs_w32_buffer_sub16.asm)

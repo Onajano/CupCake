@@ -1149,7 +1149,7 @@ def run_suite(a, work: str) -> int:
             # Whole-wave mask test, as in check.py: needs a 64-wide subgroup, skipped where the device has none.
             # With LEONIDA_W64_EMULATE=1 it was translated with --wave64-emulate and runs on any subgroup size.
             results.append((name,) + wavemask_check(vk_compute, spv, cs_env, w64_emulated()))
-        elif name in ("cs_store", "cs_signed_zero_nan", "cs_smem_soffset_imm", "cs_w32_lane_wrap", "cs_movrelsd_2", "cs_w32_permute", "cs_w32_sincos", "cs_w32_buffer_sub16", "cs_w32_buffer_store_sub", "cs_w32_fcmpswap", "cs_w32_permlane_fi", "cs_exec_const", "cs_w32_mask_imm", "cs_w64_mask_imm", "cs_w32_lds_u8_d16", "cs_w32_lds_subdword", "cs_w32_lds_wide", "cs_w32_int_ext", "cs_w32_salu64", "cs_w32_misc_ext", "cs_w32_new_ops", "cs_wave64_ballot", "cs_wm_half_ops", "cs_wm_half_cmp", "cs_wm_bfm64", "cs_wm_scc_rfl", "cs_wqm_w64", "cs_wqm_w32", "cs_wqm_w64_half",
+        elif name in ("cs_store", "cs_signed_zero_nan", "cs_smem_soffset_imm", "cs_w32_lane_wrap", "cs_movrelsd_2", "cs_w32_permute", "cs_w32_sincos", "cs_w32_lds_add_f32", "cs_w32_buffer_sub16", "cs_w32_buffer_store_sub", "cs_w32_fcmpswap", "cs_w32_permlane_fi", "cs_exec_const", "cs_w32_mask_imm", "cs_w64_mask_imm", "cs_w32_lds_u8_d16", "cs_w32_lds_subdword", "cs_w32_lds_wide", "cs_w32_int_ext", "cs_w32_salu64", "cs_w32_misc_ext", "cs_w32_new_ops", "cs_wave64_ballot", "cs_wm_half_ops", "cs_wm_half_cmp", "cs_wm_bfm64", "cs_wm_scc_rfl", "cs_wqm_w64", "cs_wqm_w32", "cs_wqm_w64_half",
                       "cs_dpp", "cs_dpp_row", "cs_dpp_mask", "cs_dpp8", "cs_dpp_ops", "cs_dpp_bank", "cs_dpp_fi",
                       "cs_dpp_bound", "cs_dpp_w64",
                       "cs_w64_mask_detect",
@@ -1176,6 +1176,8 @@ def run_suite(a, work: str) -> int:
                 # 64-bit scalar data ops and v_mad_u64_u32 (cs_w32_salu64.asm)
                 # more ops with CPU-only checks until now (cs_w32_misc_ext.asm)
                 # ops merged on 2026-11-22 with CPU-only checks (cs_w32_new_ops.asm)
+                # ds_add_f32 / ds_add_rtn_f32: binary32 add, ties to even (cs_w32_lds_add_f32.asm)
+                "cs_w32_lds_add_f32": [0x3FC00000, 0x40700000, 0x4B800000, 0x4B800002, 0, 0x7F800000, 0x3E800000, 0x40200000],
                 # plain 8/16-bit MUBUF stores, one crossing a dword (cs_w32_buffer_store_sub.asm)
                 "cs_w32_buffer_store_sub": [0x1122AB44, 0xCDEF7788, 0x34AABBCC, 0xDDDDDD12, 0x0102035A, 0x05061234, 0xAB, 0xFFFFCDEF],
                 # 8/16-bit MUBUF d16 loads and stores (cs_w32_buffer_sub16.asm)
@@ -1283,7 +1285,7 @@ def run_suite(a, work: str) -> int:
                                   "cs_w32_permute", "cs_barrier_divergent", "cs_barrier_early_end", "cs_barrier_loop",
                                   "cs_w32_lds_u8_d16", "cs_w32_int_ext", "cs_w32_salu64", "cs_w32_misc_ext", "cs_w32_new_ops",
                                   "cs_w32_lds_subdword", "cs_w32_lds_wide",
-                                  "cs_bpermute32", "cs_w32_partial_scmp", "cs_w32_partial_permute", "cs_w32_permlane_fi", "cs_w32_sincos", "cs_w32_buffer_sub16", "cs_w32_buffer_store_sub", "cs_w32_fcmpswap",
+                                  "cs_bpermute32", "cs_w32_partial_scmp", "cs_w32_partial_permute", "cs_w32_permlane_fi", "cs_w32_sincos", "cs_w32_lds_add_f32", "cs_w32_buffer_sub16", "cs_w32_buffer_store_sub", "cs_w32_fcmpswap",
                                   "cs_lds_b64_cmpst", "cs_lds_xchg64_ext", "cs_lds_atomics_ext", "cs_exec_const", "cs_w32_mask_imm", "cs_mask_vgpr_exec",
                                   "cs_dpp", "cs_dpp_row", "cs_dpp_mask", "cs_dpp8",
                                   "cs_dpp_ops", "cs_dpp_bound", "cs_dpp_bank", "cs_dpp_fi", "cs_w32_andn2_exec",
