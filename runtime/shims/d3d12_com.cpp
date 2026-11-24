@@ -485,6 +485,7 @@ public:
     void STDMETHODCALLTYPE DispatchMesh(UINT x, UINT y, UINT z) override {
         d3d12_trace::record("ID3D12GraphicsCommandList6::DispatchMesh");
         if (x > 65535 || y > 65535 || z > 65535 || std::uint64_t(x) * y * z > (1u << 22)) return check(false);
+        if (stub_pipeline_) return;  // as record_draw
         if (!graphics_pipeline_ || !graphics_.layout) return check(false);
         if (!(viewport_.width > 0) || !(viewport_.height > 0)) return;  // as record_draw: nothing is rasterized
         leonida::Draw draw{graphics_pipeline_, graphics_.data, draw_views(), depth_, {}, 0, viewport_,
@@ -847,6 +848,7 @@ public:
         if (argument_buffer_offset > arg_desc.Width ||
             UINT64(max_command_count) > (arg_desc.Width - argument_buffer_offset) / stride)
             return check(false);
+        if (stub_pipeline_) return;  // as record_draw: the arguments were checked, nothing is recorded
         leonida::ExecuteIndirect cmd{};
         cmd.kind = kind;
         cmd.stride = stride;
@@ -1257,6 +1259,7 @@ private:
     RootState graphics_;
     std::uintptr_t compute_pipeline_ = 0;
     std::uintptr_t graphics_pipeline_ = 0;
+    bool stub_pipeline_ = false;  // the bound pipeline state is a LEONIDA_STUB_PIPELINES stub (set_pipeline)
     ID3D12DescriptorHeap* cbv_srv_uav_heap_ = nullptr;
     ID3D12DescriptorHeap* sampler_heap_ = nullptr;
     D3D12_GPU_VIRTUAL_ADDRESS cbv_srv_uav_base_ = 0;
@@ -1321,7 +1324,10 @@ private:
         hold(state);
         compute_pipeline_ = compute_pipeline_id(state);
         graphics_pipeline_ = graphics_pipeline_id(state);
-        if (state && !compute_pipeline_ && !graphics_pipeline_)
+        // A LEONIDA_STUB_PIPELINES stub holds no pipeline: what is drawn or dispatched while it is bound is dropped
+        // (record_draw, record_dispatch, DispatchMesh), where no pipeline at all makes the list invalid.
+        stub_pipeline_ = pipeline_is_stub(state);
+        if (state && !compute_pipeline_ && !graphics_pipeline_ && !stub_pipeline_)
             stub("ID3D12GraphicsCommandList::SetPipelineState(pipeline from another device)");
     }
 
@@ -1390,6 +1396,7 @@ private:
     }
 
     void record_dispatch(UINT x, UINT y, UINT z) {
+        if (stub_pipeline_) return;  // a stubbed pipeline: nothing to run, and the list stays valid
         if (!compute_pipeline_ || !compute_.layout) return check(false);
         note_direct_heap_indexing(compute_.layout);
         check(list_.dispatch({compute_pipeline_, compute_.data, x, y, z}));
@@ -1410,6 +1417,7 @@ private:
 
     // A draw needs a graphics pipeline, a graphics root signature and a topology.
     void record_draw(bool indexed, UINT count, UINT instances, UINT first, INT base_vertex, UINT first_instance) {
+        if (stub_pipeline_) return;  // a stubbed pipeline: nothing to run, and the list stays valid
         if (!graphics_pipeline_ || !graphics_.layout || !topology_) return check(false);
         note_direct_heap_indexing(graphics_.layout);
         // No viewport (never set, or unbound with RSSetViewports(0)) or an empty one: D3D12 rasterizes nothing,

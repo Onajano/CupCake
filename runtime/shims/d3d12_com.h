@@ -401,6 +401,9 @@ struct RootArgumentLayout {
 const RootArgumentLayout* root_signature_layout(ID3D12RootSignature* signature);
 std::uintptr_t compute_pipeline_id(ID3D12PipelineState* pipeline);
 std::uintptr_t graphics_pipeline_id(ID3D12PipelineState* pipeline);
+// True for a pipeline state of this device that holds no pipeline: what LEONIDA_STUB_PIPELINES creates in place of a
+// pipeline whose translated shader is missing. Draws and dispatches made while it is bound are not recorded.
+bool pipeline_is_stub(ID3D12PipelineState* pipeline);
 // What each stage of a Vulkan device's PSO asked for (src/subgroup_size.h), in creation order; null for another PSO.
 const std::vector<leonida::SubgroupRequest>* pipeline_subgroup_requests(ID3D12PipelineState* pipeline);
 
