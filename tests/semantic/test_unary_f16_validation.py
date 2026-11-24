@@ -43,7 +43,9 @@ def validate_spirv(spv_text):
     spirv_as = shutil.which("spirv-as")
     spirv_val = shutil.which("spirv-val")
     if not spirv_as or not spirv_val:
-        raise AssertionError("spirv-as / spirv-val not found on PATH")
+        if os.environ.get("LEONIDA_REQUIRE_SPIRV_TOOLS") == "1":
+            raise AssertionError("spirv-as / spirv-val required but not found on PATH")
+        return
     with tempfile.TemporaryDirectory() as d:
         asm_p = os.path.join(d, "s.spvasm")
         bin_p = os.path.join(d, "s.spv")

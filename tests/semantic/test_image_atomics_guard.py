@@ -31,12 +31,18 @@ SPIRV_VAL = shutil.which("spirv-val")
 
 FSSM = bytes(0x138) + struct.pack("<4I", 0x88 | (12 << 1), 32, 1, 1)
 
+# A program that never writes EXEC translates with `exec_static_true` (#4473): every lane is active, so
+# `Gen.active_b` is the constant `%true` and `%active` is never loaded. The guard tests write EXEC first so the
+# guard reads the real `%active`; `test_no_exec_write_guards_with_static_true` covers the constant form.
+EXEC_WRITE = "s_mov_b32 exec_lo, 0x55555555"
 
-def translate(lines, *, emulate=False):
+
+def translate(lines, *, emulate=False, write_exec=True):
     prev = rdna2spirv.WAVE64_EMULATE
     rdna2spirv.WAVE64_EMULATE = emulate
+    prologue = [EXEC_WRITE] if write_exec else []
     try:
-        return support.translate_lines("cs_img_atomic_guard", lines + ["s_endpgm"], fssm=FSSM)
+        return support.translate_lines("cs_img_atomic_guard", prologue + lines + ["s_endpgm"], fssm=FSSM)
     finally:
         rdna2spirv.WAVE64_EMULATE = prev
 
@@ -73,11 +79,12 @@ def parse_blocks(spv):
     return blocks
 
 
-def find_guarded_texel_block(spv):
+def find_guarded_texel_block(spv, *, static_true=False):
     """Verify every OpImageTexelPointer sits inside a basic block entered via an OpSelectionMerge
-    conditional branch whose condition is an OpLoad %bool %active, and return that block's instructions."""
+    conditional branch whose condition is an OpLoad %bool %active (or, with `static_true`, the constant
+    `%true` a program without EXEC writes uses), and return that block's instructions."""
     blocks = parse_blocks(spv)
-    active_loads = set(re.findall(r"^\s*(%\w+) = OpLoad %bool %active\b", spv, re.M))
+    active_loads = {"%true"} if static_true else set(re.findall(r"^\s*(%\w+) = OpLoad %bool %active\b", spv, re.M))
     guarded_targets = set()
     for insns in blocks.values():
         for i, ln in enumerate(insns):
@@ -148,6 +155,25 @@ class ImageAtomicsGuardTests(unittest.TestCase):
                         )
                         self.assertEqual(has_glc_store, bool(glc),
                                          f"glc={bool(glc)} mismatch for v0 write-back in guarded block")
+
+    def test_no_exec_write_guards_with_static_true(self):
+        for op, dim, addr in (
+            ("image_atomic_add", "dim:SQ_RSRC_IMG_2D", "v[1:2]"),
+            ("image_atomic_inc", "dim:SQ_RSRC_IMG_3D", "v[1:3]"),
+        ):
+            with self.subTest(op=op, dim=dim):
+                spv = translate([
+                    "v_mov_b32_e32 v0, 5",
+                    "v_mov_b32_e32 v1, 1",
+                    "v_mov_b32_e32 v2, 2",
+                    "v_mov_b32_e32 v3, 3",
+                    f"{op} v0, {addr}, s[4:11] dmask:0x1 {dim} unorm glc",
+                ], write_exec=False)
+                validate_spirv(spv)
+                self.assertNotIn("OpLoad %bool %active", spv)
+                self.assertEqual(len(find_guarded_texel_block(spv, static_true=True)), 1)
+                with self.assertRaises(AssertionError):
+                    find_guarded_texel_block(spv)
 
     def test_image_atomic_inc_and_dec_cas_2d_3d_and_a16(self):
         cases = [
