@@ -1385,6 +1385,17 @@ if(TARGET Vulkan::Headers)
       target_compile_definitions(${tool} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     endif()
   endforeach()
+  if(WIN32)
+    # RT-344: AMD's PC FidelityFX upscaler on a Vulkan device (src/ffx_vk_backend). Skips (77) without a GPU or
+    # without amd_fidelityfx_loader_vk.dll in LEONIDA_FFX_DIR.
+    add_executable(ffx_vk_dispatch_test test/ffx_vk_dispatch_test.cpp src/ffx_vk_backend.cpp)
+    target_link_libraries(ffx_vk_dispatch_test PRIVATE Vulkan::Headers)
+    target_compile_definitions(ffx_vk_dispatch_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    if(BUILD_TESTING)
+      add_test(NAME ffx_vk_dispatch COMMAND ffx_vk_dispatch_test)
+      set_tests_properties(ffx_vk_dispatch PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+  endif()
   # OpFmaKHR width gate of vk_shader_fma.h (shaderFmaFloat32 / shaderFmaFloat64): no Vulkan instance, no GPU.
   add_executable(vk_shader_fma_test test/vk_shader_fma_test.cpp)
   target_link_libraries(vk_shader_fma_test PRIVATE Vulkan::Headers)
@@ -1663,6 +1674,7 @@ if(TARGET Vulkan::Headers)
       COMMENT "Generating D3D12 COM stubs"
       VERBATIM)
     add_library(gta6rt_d3d12_com STATIC shims/d3d12_com.cpp shims/d3d12_vulkan_device.cpp shims/d3d12_xs_device.cpp shims/xbox_present.cpp
+                shims/ffx_upscale.cpp src/ffx_vk_backend.cpp
                 shims/dxgi_com.cpp ${LEONIDA_STUBS})   # d3d12_vulkan_device.cpp reads the PC device behind the proxy (#224)
     target_include_directories(gta6rt_d3d12_com PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
     target_link_libraries(gta6rt_d3d12_com PUBLIC Vulkan::Headers gta6rt_root_signature)
@@ -2305,6 +2317,24 @@ if(TARGET Vulkan::Headers)
     target_compile_options(d3d12_heap_properties_test PRIVATE /W4 /permissive- /utf-8)
     add_test(NAME d3d12_heap_properties COMMAND d3d12_heap_properties_test)
     set_tests_properties(d3d12_heap_properties PROPERTIES SKIP_RETURN_CODE 77)
+
+    # RT-344: the layer's Upscale command through AMD's PC upscaler. Skips without a GPU or LEONIDA_FFX_DIR's DLL.
+    add_executable(d3d12_ffx_upscale_test test/d3d12_ffx_upscale_test.cpp)
+    target_link_libraries(d3d12_ffx_upscale_test PRIVATE gta6rt_d3d12_com d3d12 dxgi)
+    target_compile_definitions(d3d12_ffx_upscale_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(d3d12_ffx_upscale_test PRIVATE /W4 /permissive- /utf-8)
+    add_test(NAME d3d12_ffx_upscale COMMAND d3d12_ffx_upscale_test)
+    set_tests_properties(d3d12_ffx_upscale PROPERTIES SKIP_RETURN_CODE 77)
+
+    # RT-344 part 2: the FFX shim as the title calls it, on (the table registers before main) and off.
+    add_executable(d3d12_ffx_shim_test test/d3d12_ffx_shim_test.cpp shims/ffx_shim.cpp shims/registry.cpp)
+    target_link_libraries(d3d12_ffx_shim_test PRIVATE gta6rt_d3d12_com d3d12 dxgi)
+    target_compile_definitions(d3d12_ffx_shim_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_options(d3d12_ffx_shim_test PRIVATE /W4 /permissive- /utf-8)
+    add_test(NAME d3d12_ffx_shim COMMAND d3d12_ffx_shim_test)
+    set_tests_properties(d3d12_ffx_shim PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "LEONIDA_FFX_PC=1")
+    add_test(NAME d3d12_ffx_shim_off COMMAND d3d12_ffx_shim_test --expect-off)
+    set_tests_properties(d3d12_ffx_shim_off PROPERTIES ENVIRONMENT "LEONIDA_FFX_PC=0")
 
     # CreatePipelineLibrary and ID3D12PipelineLibrary1 arguments, compared with the host runtime.
     add_executable(d3d12_pipeline_library_host_test test/d3d12_pipeline_library_host_test.cpp)
@@ -3082,6 +3112,9 @@ if(TARGET Vulkan::Headers)
     # The loader can create this device instead of the host's (D3D12XboxCreateDevice, LEONIDA_D3D12=vulkan).
     if(TARGET gta6rt)
       target_link_libraries(gta6rt PRIVATE gta6rt_d3d12_com)
+      # RT-344: the FFX upscale shim registers itself before main (with LEONIDA_FFX_PC=1), so it is a source of the
+      # executable: in the static library nothing would reference it and the linker would leave it out.
+      target_sources(gta6rt PRIVATE shims/ffx_shim.cpp)
       target_compile_definitions(gta6rt PRIVATE LEONIDA_VULKAN_DEVICE)
 
       # A stand-in title that imports d3d12_xs.dll!D3D12XboxCreateDevice and runs a clear and a readback on the

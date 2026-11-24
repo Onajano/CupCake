@@ -968,6 +968,12 @@ public:
         check(list_.copy_acceleration_structure({dest, source, static_cast<std::uint32_t>(mode)}));
     }
 
+    // RT-344: an upscale for the PC upscaler (rt::ffx_upscale), which runs compute work: not in a bundle or a copy list.
+    bool record_upscale(const leonida::Upscale& upscale) {
+        if (type_ == D3D12_COMMAND_LIST_TYPE_BUNDLE || type_ == D3D12_COMMAND_LIST_TYPE_COPY) return false;
+        return list_.upscale(upscale);
+    }
+
     static GraphicsCommandList* from(IUnknown* object) { return Child::from<GraphicsCommandList>(object); }
 
 private:
@@ -2079,6 +2085,11 @@ bool recorded_commands(ID3D12GraphicsCommandList* list, std::vector<leonida::Com
     const auto recorded = l->commands().commands();
     commands.assign(recorded.begin(), recorded.end());
     return true;
+}
+
+bool record_upscale(ID3D12GraphicsCommandList* list, const leonida::Upscale& upscale) {
+    GraphicsCommandList* object = GraphicsCommandList::from(list);
+    return object && object->record_upscale(upscale);
 }
 
 bool bound_descriptor_heap_bases(ID3D12GraphicsCommandList* list, D3D12_GPU_VIRTUAL_ADDRESS& cbv_srv_uav,

@@ -1,6 +1,6 @@
-// The subset of the public FidelityFX API that fsr_dispatch_test.cpp calls, written out from the FidelityFX SDK
-// v2.4.0 headers Kits/FidelityFX/api/include/ffx_api.h, api/include/ffx_api_types.h,
-// api/include/dx12/ffx_api_dx12.h and
+// The subset of the public FidelityFX API that fsr_dispatch_test.cpp and src/ffx_vk_backend.cpp call, written out
+// from the FidelityFX SDK v2.4.0 headers Kits/FidelityFX/api/include/ffx_api.h, api/include/ffx_api_types.h,
+// api/include/dx12/ffx_api_dx12.h, api/include/vk/ffx_api_vk.h and
 // upscalers/include/ffx_upscale.h (https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK). Those headers carry
 // the MIT license below. Only declarations are here: no AMD code, and nothing from the game's DLL.
 //
@@ -21,6 +21,7 @@
 // IN THE SOFTWARE.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace ffx {
@@ -44,6 +45,7 @@ constexpr uint32_t EFFECT_MASK = 0x00ff0000u;
 constexpr uint32_t BACKEND_MASK = 0xff000000u;
 constexpr uint32_t EFFECT_ID_UPSCALE = 0x00010000u;
 constexpr uint32_t BACKEND_ID_DX12 = 0x00000000u;
+constexpr uint32_t BACKEND_ID_VK = 0x01000000u;
 constexpr uint32_t BACKEND_ID_XBOX = 0x02000000u;  // declared in ffx_api.h; its descriptors are not public
 
 constexpr StructType effect_sub_id(uint32_t effect, uint32_t sub) { return (effect & EFFECT_MASK) | (sub & ~EFFECT_MASK); }
@@ -75,6 +77,13 @@ struct QueryDescGetVersions {
     uint64_t* outputCount;
     uint64_t* versionIds;
     const char** versionNames;
+};
+
+constexpr StructType QUERY_DESC_TYPE_GET_PROVIDER_VERSION = 6u;
+struct QueryGetProviderVersion {
+    Header header;
+    uint64_t versionId;       // the provider the queried context uses; 0 if the query was invalid
+    const char* versionName;  // e.g. "4.1.2"
 };
 
 struct Dimensions2D {
@@ -121,6 +130,23 @@ struct QueryDescUpscaleGetRenderResolutionFromQualityMode {
     uint32_t* pOutRenderHeight;
 };
 
+// ffx_upscale.h: the memory the upscaler would allocate for these sizes. `device` is the API's device (for Vulkan a
+// VkDeviceContext*); the console title passes its ID3D12Device here (docs/d3d12_vulkan.md A.3: device at +0x10).
+constexpr StructType QUERY_DESC_TYPE_UPSCALE_GPU_MEMORY_USAGE_V2 = effect_sub_id(EFFECT_ID_UPSCALE, 0x09);
+struct EffectMemoryUsage {
+    uint64_t totalUsageInBytes;
+    uint64_t aliasableUsageInBytes;
+};
+struct QueryDescUpscaleGetGPUMemoryUsageV2 {
+    Header header;
+    void* device;
+    Dimensions2D maxRenderSize;
+    Dimensions2D maxUpscaleSize;
+    uint32_t flags;
+    EffectMemoryUsage* gpuMemoryUsageUpscaler;
+};
+static_assert(offsetof(QueryDescUpscaleGetGPUMemoryUsageV2, device) == 0x10, "measured: the device at +0x10");
+
 enum : uint32_t { QUALITY_MODE_NATIVEAA = 0, QUALITY_MODE_QUALITY = 1, QUALITY_MODE_PERFORMANCE = 3 };
 
 // ffx_api_dx12.h. The DLL's own backend descriptor would be a BACKEND_ID_XBOX sub-id; its layout is not public.
@@ -128,6 +154,18 @@ constexpr StructType CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12 = backend_sub_id(BACK
 struct CreateBackendDX12Desc {
     Header header;
     void* device;  // ID3D12Device*
+};
+
+// ffx_api_vk.h. The Vulkan handles are kept as void* so this header needs no vulkan.h.
+constexpr StructType CREATE_CONTEXT_DESC_TYPE_BACKEND_VK = backend_sub_id(BACKEND_ID_VK, 0x03);
+struct VkDeviceContext {
+    void* vkDevice;          // VkDevice
+    void* vkPhysicalDevice;  // VkPhysicalDevice
+    void* vkDeviceProcAddr;  // PFN_vkGetDeviceProcAddr
+};
+struct CreateBackendVKDesc {
+    Header header;
+    VkDeviceContext deviceContext;
 };
 
 // ffx_api_types.h: resources and the values used below.
@@ -152,7 +190,7 @@ struct ResourceDescription {
 };
 
 struct Resource {
-    void* resource;  // ID3D12Resource*
+    void* resource;  // ID3D12Resource*, or a VkImage on the Vulkan backend
     ResourceDescription description;
     uint32_t state;
 };
@@ -166,7 +204,7 @@ struct FloatCoords2D {
 constexpr StructType DISPATCH_DESC_TYPE_UPSCALE = effect_sub_id(EFFECT_ID_UPSCALE, 0x01);
 struct DispatchDescUpscale {
     Header header;
-    void* commandList;
+    void* commandList;  // ID3D12GraphicsCommandList*, or a VkCommandBuffer on the Vulkan backend
     Resource color;
     Resource depth;
     Resource motionVectors;
