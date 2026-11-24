@@ -13343,7 +13343,10 @@ class Gen:
             sp, smp, si = self.tmp(), self.tmp(), self.tmp()
             self.dynamic_sampled_access(sp, "%_ptr_UC_smp", "%samplers", smp_idx)
             self.emit(f"{smp} = OpLoad %smp {sp}")
-            typed_implicit = op == "image_sample" and self.stage == "ps" and dim == "dim:SQ_RSRC_IMG_2D"
+            # A plain image_sample reads a UINT/SINT image through its integer view in every dimension and stage, as
+            # the hardware picks the view from T# FORMAT. In the PS it samples with the gradients of the coordinates
+            # (taken before the format branch); elsewhere it has no derivatives and reads LOD 0, as the float form.
+            typed_implicit = op == "image_sample"
             # An explicit-LOD sample has the same shape in every dimension, so it takes the typed read too:
             # image_read_typed picks the UINT/SINT alias of the dimension's sampled binding (image_load does).
             typed_sample = typed_implicit or op in ("image_sample_l", "image_sample_lz")
@@ -13585,11 +13588,17 @@ class Gen:
                 # 6-layer 2D-array view, which is what `img` was loaded from above.
                 di = self.STORE_DIMS[view_dim][0]
                 operands = f"Lod {lod}"
-                if typed_implicit:
-                    # Compute the quad gradients before the per-image format branch.
+                if typed_implicit and self.stage == "ps":
+                    # Compute the quad gradients before the per-image format branch. They cover the coordinates
+                    # an implicit LOD derives from: not the array layer (2D array, and a cube's 2D-array view).
+                    gty = "%float" if grad_width == 1 else f"%v{grad_width}float"
+                    p = uv
+                    if grad_width != ncoord:
+                        p = self.tmp()
+                        self.emit(f"{p} = OpCompositeConstruct {gty} {' '.join(f[:grad_width])}")
                     dx, dy = self.tmp(), self.tmp()
-                    self.emit(f"{dx} = OpDPdx %v2float {uv}")
-                    self.emit(f"{dy} = OpDPdy %v2float {uv}")
+                    self.emit(f"{dx} = OpDPdx {gty} {p}")
+                    self.emit(f"{dy} = OpDPdy {gty} {p}")
                     operands = f"Grad {dx} {dy}"
 
                 def sample(image, cls, ty):
