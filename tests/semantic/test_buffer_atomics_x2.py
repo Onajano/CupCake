@@ -28,7 +28,8 @@ STUB_DXBC = b"DXBC" + bytes(24) + struct.pack("<I", 0) + bytes(4)
 FSSM = bytearray(0x148)
 struct.pack_into("<4I", FSSM, 0x138, 0x88, 32, 1, 1)     # 4 user SGPRs, workgroup id in s4, 32x1x1
 FSSM = bytes(FSSM)
-MODEL = {"and": lambda m, d: m & d, "or": lambda m, d: m | d, "xor": lambda m, d: m ^ d, "swap": lambda m, d: d}
+MODEL = {"and": lambda m, d: m & d, "or": lambda m, d: m | d, "xor": lambda m, d: m ^ d, "swap": lambda m, d: d,
+         "add": lambda m, d: (m + d) & ((1 << 64) - 1), "sub": lambda m, d: (m - d) & ((1 << 64) - 1)}
 VALUES = [0, (1 << 64) - 1, 0x00000000_FFFFFFFF, 0xFFFFFFFF_00000000, 0x12345678_9ABCDEF0]
 ELEM, OUT, RECORDS = 0x40, 0x80, 0x100      # byte offsets in the buffer (base 0), num_records
 
@@ -102,7 +103,7 @@ class BufferAtomicsX2(unittest.TestCase):
                 self.assertEqual(atomic_x2(kind, m, d), (split(m), split(MODEL[kind](m, d))))
 
     def test_carrying_forms_and_bad_data_rejected(self):
-        for line in ("buffer_atomic_add_x2 v[2:3], v1, s[8:11], 0 offen glc",
+        for line in ("buffer_atomic_smin_x2 v[2:3], v1, s[8:11], 0 offen glc",
                      "buffer_atomic_cmpswap_x2 v[2:5], v1, s[8:11], 0 offen glc",
                      "buffer_atomic_or_x2 v2, v1, s[8:11], 0 offen glc"):
             with self.subTest(line=line):

@@ -18,7 +18,8 @@ from test_global_atomics import OUT, TARGET, run, translate  # noqa: E402  (also
 import rdna2spirv  # noqa: E402
 
 M32 = 0xFFFFFFFF
-MODEL = {"and": lambda m, d: m & d, "or": lambda m, d: m | d, "xor": lambda m, d: m ^ d, "swap": lambda m, d: d}
+MODEL = {"and": lambda m, d: m & d, "or": lambda m, d: m | d, "xor": lambda m, d: m ^ d, "swap": lambda m, d: d,
+         "add": lambda m, d: (m + d) & ((1 << 64) - 1), "sub": lambda m, d: (m - d) & ((1 << 64) - 1)}
 VALUES = [0, (1 << 64) - 1, 0x00000000_FFFFFFFF, 0xFFFFFFFF_00000000, 0x12345678_9ABCDEF0]
 
 
@@ -60,8 +61,30 @@ class GlobalAtomicsX2(unittest.TestCase):
             with self.subTest(op=kind, m=hex(m), d=hex(d)):
                 self.assertEqual(atomic_x2(kind, m, d), (split(m), split(MODEL[kind](m, d))))
 
+    def test_add_sub_carry_and_borrow_cross_the_dword(self):
+        for kind, m, d in (("add", 0x00000001_FFFFFFFF, 1), ("add", 0xFFFFFFFF_FFFFFFFF, 1),
+                           ("add", 0x7FFFFFFF_80000000, 0x00000000_80000000), ("sub", 0x00000001_00000000, 1),
+                           ("sub", 0, 1), ("sub", 0x12345678_00000005, 0x00000001_00000006)):
+            with self.subTest(op=kind, m=hex(m), d=hex(d)):
+                self.assertEqual(atomic_x2(kind, m, d), (split(m), split(MODEL[kind](m, d))))
+
+    def test_add_x2_from_32_lanes_on_one_element_is_exact(self):
+        # The lanes run in lockstep, so their low and high atomics interleave; the carries still add up.
+        from test_global_atomics import si
+        m, d = 0x00000005_FFFFFFF0, 0x00000001_80000001
+        body = [f"v_mov_b32_e32 v1, {TARGET:#x}", f"v_mov_b32_e32 v2, {d & M32:#x}", f"v_mov_b32_e32 v3, {d >> 32:#x}",
+                "global_atomic_add_x2 v1, v[2:3], s[0:1]", "s_endpgm"]
+        for kind, want in (("add", m + 32 * d), ("sub", m - 32 * d)):
+            with self.subTest(op=kind):
+                spv = translate([ln.replace("_add_", f"_{kind}_") for ln in body[:-1]])
+                mem = {TARGET: m & M32, TARGET + 4: m >> 32}
+                si.run_workgroup(spv, 32, 32, inputs_for=lambda i: {"%wg_id": (0, 0, 0), "%local_id": (i, 0, 0),
+                                                                     "%sg_lane": i},
+                                 push_constants=[0] * 36, memory=mem)
+                self.assertEqual((mem[TARGET], mem[TARGET + 4]), split(want & ((1 << 64) - 1)))
+
     def test_carrying_and_comparing_forms_rejected(self):
-        for kind in ("add", "sub", "smin", "umax", "cmpswap"):
+        for kind in ("smin", "umax", "cmpswap"):
             with self.subTest(op=kind):
                 with self.assertRaises(rdna2spirv.Unsupported):
                     translate(["v_mov_b32_e32 v1, 0", f"global_atomic_{kind}_x2 v[6:7], v1, v[2:3], s[0:1] glc"])

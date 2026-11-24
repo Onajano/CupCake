@@ -2902,10 +2902,11 @@ class Gen:
         bitwise op, whose bits are independent, but not always for an exchange: two lanes swapping into one element at
         once can leave one's low dword with the other's high dword (A.lo, B.lo, B.hi, A.hi). The returned pair is two
         reads, so another lane's 64-bit op on the same element between them could be seen half done. The other _x2
-        forms (add/sub/min/max carry or compare across the dwords, cmpswap_x2 compares all 64 bits) and inc/dec stay
-        Unsupported. fcmpswap compares as binary32 (float_cmpswap_loop)."""
+        forms (min/max compare across the dwords, cmpswap_x2 compares all 64 bits) and inc/dec stay Unsupported;
+        add_x2 / sub_x2 carry the low dword's carry (borrow) into the high dword (x2_atomic_words), exact under
+        contention. fcmpswap compares as binary32 (float_cmpswap_loop)."""
         kind = op[len("global_atomic_"):]
-        if kind in ("and_x2", "or_x2", "xor_x2", "swap_x2"):
+        if kind in ("and_x2", "or_x2", "xor_x2", "swap_x2", "add_x2", "sub_x2"):
             return self.global_atomic_x2(op, kind[:-3], a, mods)
         if kind in ("fmin", "fmax"):
             return self.global_atomic_float(op, kind, a, mods)
@@ -2974,6 +2975,35 @@ class Gen:
         if vdst is not None:
             self.dst(vdst, old)
 
+    def x2_atomic_words(self, kind, ptrs, vals):
+        """The two 32-bit atomics of a 64-bit global / buffer atomic on the dwords at ptrs (low, high) with DATA
+        vals (low, high); returns the two old dwords. and/or/xor/swap act on each dword alone. add/sub carry: the
+        low dword's atomic returns its old value, from which this op's own carry (borrow) follows, and the high
+        dword then takes DATA.hi + carry. Addition commutes and the carries over any order of the ops add up to the
+        low dword's wraps, so the memory is exact even with other lanes on the element (as #2738 does for LDS); the
+        returned high dword comes from its own atomic, so another op between the two can show up half done."""
+        sc, sem = self.cu(1), self.cu(0)
+        if kind in ("add", "sub"):
+            lo_op = "OpAtomicIAdd" if kind == "add" else "OpAtomicISub"
+            old_lo, new_lo, c, cy, hi = (self.tmp() for _ in range(5))
+            self.emit(f"{old_lo} = {lo_op} %uint {ptrs[0]} {sc} {sem} {vals[0]}")
+            if kind == "add":
+                self.emit(f"{new_lo} = OpIAdd %uint {old_lo} {vals[0]}")
+                self.emit(f"{c} = OpULessThan %bool {new_lo} {old_lo}")       # carry out of the low dword
+            else:
+                self.emit(f"{c} = OpULessThan %bool {old_lo} {vals[0]}")      # borrow into the low dword
+            self.emit(f"{cy} = OpSelect %uint {c} {self.cu(1)} {self.cu(0)}")
+            self.emit(f"{hi} = OpIAdd %uint {vals[1]} {cy}")
+            old_hi = self.tmp()
+            self.emit(f"{old_hi} = {lo_op} %uint {ptrs[1]} {sc} {sem} {hi}")
+            return [old_lo, old_hi]
+        res = []
+        for w in range(2):
+            r = self.tmp()
+            self.emit(f"{r} = {self.BUF_ATOMICS[kind][0]} %uint {ptrs[w]} {sc} {sem} {vals[w]}")
+            res.append(r)
+        return res
+
     def global_atomic_x2(self, op, kind, a, mods):
         """global_atomic_{and,or,xor,swap}_x2 (see global_atomic): one 32-bit atomic per dword of the element."""
         if any(m in mods for m in ("slc", "dlc", "lds")):
@@ -2998,12 +3028,12 @@ class Gen:
         self.emit(f"{lbl_do} = OpLabel")
         ptr = self.tmp()
         self.emit(f"{ptr} = OpConvertUToPtr %_ptr_PSB_arr {self.host_addr(full)}")
-        res = []
+        ptrs = []
         for w in range(2):
-            p, r = self.tmp(), self.tmp()
+            p = self.tmp()
             self.emit(f"{p} = OpAccessChain %_ptr_PSB_uint {ptr} {self.cu(w)}")
-            self.emit(f"{r} = {spv} %uint {p} {self.cu(1)} {self.cu(0)} {vals[w]}")
-            res.append(r)
+            ptrs.append(p)
+        res = self.x2_atomic_words(kind, ptrs, vals)
         self.emit(f"OpBranch {lbl_end}")
         self.emit(f"{lbl_end} = OpLabel")
         olds = []
@@ -3047,7 +3077,7 @@ class Gen:
         address). With 'glc' the pre-op value is returned in vdata. Inactive lanes don't touch memory and keep vdata;
         active OOB or unaligned (addr % 4 != 0) lanes leave memory untouched and write 0 with glc (measured on gfx1036)."""
         kind = op[len("buffer_atomic_"):]
-        if kind in ("and_x2", "or_x2", "xor_x2", "swap_x2"):
+        if kind in ("and_x2", "or_x2", "xor_x2", "swap_x2", "add_x2", "sub_x2"):
             return self.buffer_atomic_x2(op, kind[:-3], a, mods)
         if kind in ("fmin", "fmax"):
             return self.buffer_atomic_float(op, kind, a, mods)
@@ -3140,12 +3170,12 @@ class Gen:
         self.emit(f"{lbl_do} = OpLabel")
         ptr = self.tmp()
         self.emit(f"{ptr} = OpConvertUToPtr %_ptr_PSB_arr {self.host_addr(addr)}")
-        res = []
+        ptrs = []
         for w in range(2):
-            p, r = self.tmp(), self.tmp()
+            p = self.tmp()
             self.emit(f"{p} = OpAccessChain %_ptr_PSB_uint {ptr} {self.cu(w)}")
-            self.emit(f"{r} = {self.BUF_ATOMICS[kind][0]} %uint {p} {self.cu(1)} {self.cu(0)} {vals[w]}")
-            res.append(r)
+            ptrs.append(p)
+        res = self.x2_atomic_words(kind, ptrs, vals)
         self.emit(f"OpBranch {lbl_end}")
         self.emit(f"{lbl_end} = OpLabel")
         olds = []
